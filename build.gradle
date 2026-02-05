@@ -1,0 +1,51 @@
+plugins {
+    id 'java-library'
+    id 'org.springframework.boot' version '4.1.0-M1'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'io.oneiros'
+version = '1.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = '21'
+}
+
+repositories {
+    mavenCentral() // <--- MUSS DA SEIN!
+    maven { url 'https://repo.spring.io/milestone' }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux:4.1.0-M1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.0'
+    implementation 'org.springframework:spring-websocket:7.0.3'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
+    implementation 'org.springframework.boot:spring-boot-starter-aop:4.0.0-M1'
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+    testCompileOnly 'org.projectlombok:lombok:1.18.30'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation 'org.assertj:assertj-core:3.27.7'
+    testImplementation 'io.projectreactor:reactor-test:3.8.2'
+    testImplementation 'org.mockito:mockito-core:5.15.2'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.15.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Da dies eine Library ist, kein ausführbares JAR
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+}

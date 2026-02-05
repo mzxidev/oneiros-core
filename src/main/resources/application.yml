@@ -1,0 +1,17 @@
+spring:
+  main:
+    web-application-type: reactive # WICHTIG für WebFlux
+    allow-bean-definition-overriding: true
+
+oneiros:
+  url: "ws://127.0.0.1:8000/rpc"
+  username: "root"
+  password: "root"
+  namespace: "marketplace"
+  database: "secret_db"
+  security:
+    enabled: true
+    key: "SuperGeheimerKeyFuerEncryption123" # Muss > 16 Zeichen sein
+  cache:
+    enabled: true
+    ttl-seconds: 60
