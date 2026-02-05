@@ -48,14 +48,34 @@ public class OneirosProperties {
 
     }
 
-    private Cache cache = new Cache(); // <--- NEU
+    private Cache cache = new Cache();
+
+    private Migration migration = new Migration();
+
+    private ConnectionPool connectionPool = new ConnectionPool();
 
     @Setter
     @Getter
     public static class Cache {
         private boolean enabled = true;
-        private long ttlSeconds = 60; // Daten bleiben 60s frisch
-        private long maxSize = 10000; // Maximal 10.000 Objekte im RAM
+        private long ttlSeconds = 60;
+        private long maxSize = 10000;
+    }
 
+    @Setter
+    @Getter
+    public static class Migration {
+        private boolean enabled = true;
+        private String basePackage = "io.oneiros";
+        private boolean dryRun = false;
+    }
+
+    @Setter
+    @Getter
+    public static class ConnectionPool {
+        private boolean enabled = false;
+        private int size = 5;
+        private long healthCheckIntervalSeconds = 30;
+        private long reconnectDelaySeconds = 5;
     }
 }

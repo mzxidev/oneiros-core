@@ -55,6 +55,13 @@
 - ⚡ **Query Optimization** - TIMEOUT, PARALLEL execution, START/LIMIT pagination
 - 🎨 **Privacy Control** - OMIT sensitive fields, FETCH related records
 
+### 🚀 **Real-time & Performance Features**
+- 🔴 **Live Queries** - Real-time data streams with LIVE SELECT
+- 🏊 **Connection Pooling** - Load balancing with multiple WebSocket connections
+- 🔍 **Full-Text Search** - BM25 ranking, highlights, custom analyzers
+- 🛡️ **Circuit Breaker** - Automatic failure detection and recovery
+- 📈 **Health Monitoring** - Spring Boot Actuator integration
+
 ### 📈 **SurrealQL Support**
 - ✅ **Data Operations**: SELECT, CREATE, UPDATE, DELETE, UPSERT, INSERT
 - ✅ **Graph Operations**: RELATE for bidirectional relationships
@@ -584,6 +591,227 @@ SelectStatement.from(User.class)
 SelectStatement.from(User.class)
     .limit(50)
     .execute(client);
+```
+
+---
+
+## 🔴 Real-time & Performance Features
+
+### Live Queries
+
+Subscribe to real-time updates from SurrealDB using LIVE SELECT.
+
+#### Basic Live Query
+
+```java
+@Service
+public class ProductService {
+    
+    private final OneirosLiveManager liveManager;
+    
+    // Subscribe to product price changes
+    public Flux<OneirosEvent<Product>> watchPriceChanges() {
+        return liveManager.live(Product.class)
+            .where("price < 100")
+            .subscribe();
+    }
+    
+    // Handle events
+    public void startWatching() {
+        watchPriceChanges()
+            .subscribe(event -> {
+                switch (event.getAction()) {
+                    case CREATE -> log.info("New product: {}", event.getData());
+                    case UPDATE -> log.info("Updated: {}", event.getData());
+                    case DELETE -> log.info("Deleted: {}", event.getId());
+                }
+            });
+    }
+}
+```
+
+#### Live Query with Encryption
+
+Encrypted fields are automatically decrypted in live events:
+
+```java
+@Service
+public class UserMonitoringService {
+    
+    private final OneirosLiveManager liveManager;
+    
+    public Flux<OneirosEvent<User>> watchAdminActions() {
+        return liveManager.live(User.class)
+            .where("role = 'ADMIN'")
+            .withDecryption(true)  // Auto-decrypt @OneirosEncrypted fields
+            .subscribe();
+    }
+}
+```
+
+#### Live Query Event Structure
+
+```java
+public class OneirosEvent<T> {
+    private LiveAction action;  // CREATE, UPDATE, DELETE
+    private String id;          // Record ID
+    private T data;             // Full record (for CREATE/UPDATE)
+    private T before;           // Previous state (for UPDATE)
+    private Instant timestamp;  // Event timestamp
+}
+```
+
+### Connection Pooling
+
+Enable connection pooling for high-traffic applications.
+
+#### Configuration
+
+```yaml
+oneiros:
+  connection-pool:
+    enabled: true                          # Enable connection pool
+    size: 5                                # Number of WebSocket connections
+    health-check-interval-seconds: 30      # Health check interval
+    reconnect-delay-seconds: 5             # Reconnect delay on failure
+```
+
+#### Features
+
+- ✅ **Round-robin load balancing** - Distributes queries across connections
+- ✅ **Automatic health checks** - Detects and removes dead connections
+- ✅ **Auto-reconnection** - Rebuilds failed connections automatically
+- ✅ **Transparent** - No code changes needed
+
+#### Usage
+
+```java
+@Service
+public class HighTrafficService {
+    
+    @Autowired
+    private OneirosClient client;  // Auto-wired as pool if enabled
+    
+    // All queries automatically use the connection pool
+    public Flux<Product> getProducts() {
+        return OneirosQuery.select(Product.class)
+            .execute(client);  // Uses next available connection
+    }
+}
+```
+
+### Full-Text Search
+
+Powerful full-text search with BM25 ranking and custom analyzers.
+
+#### Mark Fields for Search
+
+```java
+@OneirosEntity("products")
+public class Product {
+    
+    @OneirosFullText(analyzer = "ascii", bm25 = true)
+    private String description;
+    
+    @OneirosFullText(analyzer = "unicode")
+    private String title;
+}
+```
+
+#### Search API
+
+```java
+@Service
+public class SearchService {
+    
+    private final OneirosClient client;
+    
+    // Basic search
+    public Flux<Product> searchProducts(String query) {
+        return OneirosSearch.table(Product.class)
+            .content("description")
+            .matching(query)
+            .execute(client);
+    }
+    
+    // Advanced search with scoring
+    public Flux<Product> advancedSearch(String query) {
+        return OneirosSearch.table(Product.class)
+            .content("description", "title")
+            .matching(query)
+            .withScoring()
+            .minScore(0.7)
+            .withHighlights()
+            .limit(20)
+            .execute(client);
+    }
+}
+```
+
+#### Generated SurrealQL
+
+```sql
+-- Basic search
+SELECT * FROM products 
+WHERE description @@ 'wireless headphones';
+
+-- Advanced search with scoring
+SELECT *, search::score(1) AS relevance
+FROM products
+WHERE description @@ 'wireless headphones'
+   OR title @@ 'wireless headphones'
+ORDER BY relevance DESC
+LIMIT 20;
+```
+
+#### Search Results with Highlights
+
+```json
+{
+  "id": "product:123",
+  "name": "Premium Headphones",
+  "description": "<mark>Wireless</mark> Bluetooth 5.0 <mark>headphones</mark>",
+  "relevance": 0.92
+}
+```
+
+### Health Monitoring
+
+Spring Boot Actuator integration for monitoring.
+
+#### Configuration
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+  endpoint:
+    health:
+      show-details: always
+```
+
+#### Health Endpoint
+
+```bash
+GET /actuator/health
+
+{
+  "status": "UP",
+  "components": {
+    "oneiros": {
+      "status": "UP",
+      "details": {
+        "connections": 5,
+        "activeConnections": 5,
+        "deadConnections": 0,
+        "totalQueries": 1523,
+        "failedQueries": 3
+      }
+    }
+  }
+}
 ```
 
 ---
