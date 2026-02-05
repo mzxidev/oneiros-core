@@ -39,6 +39,9 @@ public class OneirosWebsocketClient implements OneirosClient {
     // Speicher für offene Anfragen: Request-ID -> Antwort-Kanal
     private final Map<String, Sinks.One<RpcResponse>> pendingRequests = new ConcurrentHashMap<>();
 
+    // Live Query support: Live Query ID -> Event Sink
+    private final Map<String, Sinks.Many<Map<String, Object>>> liveQuerySinks = new ConcurrentHashMap<>();
+
     public OneirosWebsocketClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker circuitBreaker) {
         this.properties = properties;
         this.mapper = mapper;
@@ -102,45 +105,69 @@ public class OneirosWebsocketClient implements OneirosClient {
     }
 
     private void handleIncomingMessage(String json) {
-        // Trace logging ist extrem detailliert (nur in Dev anmachen)
         log.trace("📥 RX: {}", json);
 
         try {
             RpcResponse response = mapper.readValue(json, RpcResponse.class);
 
             if (response.id() != null) {
-                // Schauen, ob eine Java-Methode auf diese ID wartet
                 Sinks.One<RpcResponse> sink = pendingRequests.remove(response.id());
                 if (sink != null) {
-                    // Ergebnis in den Reactive Stream pushen
                     sink.tryEmitValue(response);
                 } else {
                     log.warn("⚠️ Received response for unknown ID: {}", response.id());
                 }
+            } else {
+                // Check if this is a live query notification
+                @SuppressWarnings("unchecked")
+                Map<String, Object> notificationMap = mapper.readValue(json, Map.class);
+                handleLiveQueryNotification(notificationMap);
             }
         } catch (Exception e) {
             log.error("💥 Failed to parse incoming message: {}", e.getMessage());
         }
     }
 
+    private void handleLiveQueryNotification(Map<String, Object> notification) {
+        String liveQueryId = extractLiveQueryId(notification);
+
+        if (liveQueryId != null) {
+            Sinks.Many<Map<String, Object>> sink = liveQuerySinks.get(liveQueryId);
+            if (sink != null) {
+                sink.tryEmitNext(notification);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private String extractLiveQueryId(Map<String, Object> notification) {
+        Object result = notification.get("result");
+        if (result instanceof Map) {
+            Map<String, Object> resultMap = (Map<String, Object>) result;
+            Object id = resultMap.get("id");
+            return id != null ? id.toString() : null;
+        }
+        return null;
+    }
+
     @Override
     public <T> Flux<T> query(String sql, Class<T> resultType) {
-        // Hier wenden wir den Circuit Breaker an!
-        return rpc("query", sql)
-                // WICHTIG: Das hier aktiviert den Schutz.
-                // Wenn der Circuit OPEN ist, wird rpc() gar nicht erst ausgeführt.
+        return query(sql, Map.of(), resultType);
+    }
+
+    @Override
+    public <T> Flux<T> query(String sql, Map<String, Object> params, Class<T> resultType) {
+        return rpc("query", sql, params)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
                 .flatMapMany(response -> {
-                    // ... (Parsing Code bleibt exakt gleich wie vorhin) ...
                     try {
                         List<Map<String, Object>> queryResults = mapper.convertValue(
                                 response.result(), new TypeReference<List<Map<String, Object>>>() {}
                         );
                         if (queryResults == null || queryResults.isEmpty()) return Flux.empty();
 
-                        Map<String, Object> firstSet = queryResults.get(0);
+                        Map<String, Object> firstSet = queryResults.getFirst();
                         if (!"OK".equals(firstSet.get("status"))) {
-                            // Ein DB-Error zählt auch zur Fehlerquote für den Circuit Breaker!
                             return Flux.error(new RuntimeException("SurrealDB Error: " + firstSet.get("detail")));
                         }
 
@@ -157,11 +184,21 @@ public class OneirosWebsocketClient implements OneirosClient {
     }
 
     @Override
+    public Flux<Map<String, Object>> listenToLiveQuery(String liveQueryId) {
+        Sinks.Many<Map<String, Object>> sink = Sinks.many().multicast().onBackpressureBuffer();
+        liveQuerySinks.put(liveQueryId, sink);
+
+        return sink.asFlux()
+            .doFinally(signal -> liveQuerySinks.remove(liveQueryId));
+    }
+
+    @Override
     public Mono<Void> disconnect() {
         // Netty managed Close meist selbst, aber wir können hier clearen
         pendingRequests.clear();
         return Mono.empty();
     }
+
 
     // --- Private Helpers ---
 

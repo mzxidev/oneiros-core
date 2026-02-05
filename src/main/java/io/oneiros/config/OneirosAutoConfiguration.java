@@ -6,16 +6,25 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.oneiros.client.OneirosClient;
 import io.oneiros.client.OneirosWebsocketClient;
+import io.oneiros.graph.OneirosGraph;
+import io.oneiros.live.OneirosLiveManager;
+import io.oneiros.migration.OneirosMigrationEngine;
+import io.oneiros.pool.OneirosConnectionPool;
 import io.oneiros.security.CryptoService;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
 
+@Slf4j
 @Configuration
 @EnableConfigurationProperties(OneirosProperties.class)
+@org.springframework.scheduling.annotation.EnableScheduling
 public class OneirosAutoConfiguration {
 
     // ANSI Colors für die Konsole
@@ -74,14 +83,84 @@ public class OneirosAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @ConditionalOnProperty(name = "oneiros.connection-pool.enabled", havingValue = "false", matchIfMissing = true)
     public OneirosClient oneirosClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker breaker) {
-        // Wir injizieren den Breaker in den Client
         OneirosWebsocketClient client = new OneirosWebsocketClient(properties, mapper, breaker);
 
-        // LAZY CONNECTION: Die Verbindung wird erst aufgebaut, wenn die erste Query kommt
-        // Das erlaubt es der Anwendung zu starten, auch wenn SurrealDB noch nicht läuft
         System.out.println(YELLOW + "⏳ Oneiros wird beim ersten Request verbunden..." + RESET);
 
         return client;
+    }
+
+    /**
+     * Connection Pool bean - manages multiple WebSocket connections for load balancing.
+     * Enabled with: oneiros.connection-pool.enabled=true
+     */
+    @Bean
+    @ConditionalOnProperty(name = "oneiros.connection-pool.enabled", havingValue = "true")
+    public OneirosClient oneirosConnectionPool(
+            OneirosProperties properties,
+            ObjectMapper mapper,
+            CircuitBreaker breaker,
+            @Value("${oneiros.connection-pool.size:5}") int poolSize) {
+
+        log.info("🏊 Initializing Oneiros Connection Pool");
+        log.info("   📊 Pool size: {}", poolSize);
+
+        OneirosConnectionPool pool = new OneirosConnectionPool(properties, mapper, breaker, poolSize);
+
+        pool.connect()
+            .doOnSuccess(v -> log.info("✅ Connection pool initialized"))
+            .doOnError(e -> log.error("❌ Connection pool initialization failed", e))
+            .subscribe();
+
+        return pool;
+    }
+
+    /**
+     * Live Query Manager bean - manages LIVE SELECT subscriptions.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public OneirosLiveManager oneirosLiveManager(OneirosClient client, ObjectMapper mapper, CryptoService crypto) {
+        log.debug("🔴 Initializing Oneiros Live Manager");
+        return new OneirosLiveManager(client, mapper, crypto);
+    }
+
+    /**
+     * Graph API bean for fluent RELATE statement building.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public OneirosGraph oneirosGraph(OneirosClient client, ObjectMapper mapper, CryptoService crypto) {
+        log.debug("🔗 Initializing Oneiros Graph API");
+        return new OneirosGraph(client, mapper, crypto);
+    }
+
+    /**
+     * Migration Engine bean - auto-generates schema from @OneirosEntity classes.
+     * Enabled by default, can be disabled with: oneiros.migration.enabled=false
+     */
+    @Bean
+    @ConditionalOnProperty(name = "oneiros.migration.enabled", havingValue = "true", matchIfMissing = true)
+    public OneirosMigrationEngine migrationEngine(
+            OneirosClient client,
+            @Value("${oneiros.migration.base-package:io.oneiros}") String basePackage,
+            @Value("${oneiros.migration.dry-run:false}") boolean dryRun) {
+
+        log.info("🔧 Initializing Oneiros Migration Engine");
+        log.info("   📦 Base package: {}", basePackage);
+        log.info("   🧪 Dry run: {}", dryRun);
+
+        OneirosMigrationEngine engine = new OneirosMigrationEngine(client, basePackage, true, dryRun);
+
+        // Execute migrations after client is connected
+        client.connect()
+            .then(engine.migrate())
+            .doOnSuccess(v -> log.info("✅ Schema migration completed"))
+            .doOnError(e -> log.error("❌ Schema migration failed", e))
+            .subscribe();
+
+        return engine;
     }
 }
