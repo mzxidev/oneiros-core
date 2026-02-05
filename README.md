@@ -68,11 +68,19 @@
 ## 📦 Installation
 
 ### Gradle (build.gradle)
+
+**Important:** Add the JitPack repository to your build file:
+
 ```groovy
+repositories {
+    mavenCentral()
+    maven { url 'https://jitpack.io' }  // Required for Oneiros
+}
+
 dependencies {
-    implementation 'io.oneiros:oneiros-core:1.0.0'
+    implementation 'com.github.mzxidev:oneiros-core:v0.2.0'
     
-    // Required dependencies
+    // Required dependencies (if not already present)
     implementation 'org.springframework.boot:spring-boot-starter-webflux:3.2.0'
     implementation 'io.projectreactor:reactor-core:3.6.0'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
@@ -80,12 +88,24 @@ dependencies {
 ```
 
 ### Maven (pom.xml)
+
+**Important:** Add the JitPack repository:
+
 ```xml
-<dependency>
-    <groupId>io.oneiros</groupId>
-    <artifactId>oneiros-core</artifactId>
-    <version>1.0.0</version>
-</dependency>
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependencies>
+    <dependency>
+        <groupId>com.github.mzxidev</groupId>
+        <artifactId>oneiros-core</artifactId>
+        <version>v0.2.0</version>
+    </dependency>
+</dependencies>
 ```
 
 ---
