@@ -60,9 +60,9 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             from components.java
-            groupId = project.group
+            groupId = 'io.oneiros'
             artifactId = 'oneiros-core'
-            version = project.version
+            version = '0.2.0'
         }
     }
 }
