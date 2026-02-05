@@ -73,7 +73,6 @@ public class OneirosQuery<T> {
     private String timeoutClause = "";
     private boolean parallelEnabled = false;
 
-    // Hilfsvariable für den Builder-State
     private String currentField;
 
     private OneirosQuery(Class<T> type) {
@@ -300,7 +299,6 @@ public class OneirosQuery<T> {
         sql.append(limitClause);
         sql.append(offsetClause);
 
-        // FETCH clause - lädt verknüpfte Records
         if (!fetchFields.isEmpty()) {
             sql.append(" FETCH ");
             sql.append(String.join(", ", fetchFields));

@@ -2,10 +2,11 @@ plugins {
     id 'java-library'
     id 'org.springframework.boot' version '4.1.0-M1'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'maven-publish'
 }
 
 group = 'io.oneiros'
-version = '1.0-SNAPSHOT'
+version = '0.2.0'
 
 java {
     sourceCompatibility = '21'
@@ -17,10 +18,12 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-webflux:4.1.0-M1'
+    api 'org.springframework.boot:spring-boot-starter-webflux:4.1.0-M1'
+
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.0'
     implementation 'org.springframework:spring-websocket:7.0.3'
     implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
+
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop:4.0.0-M1'
     implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
@@ -41,11 +44,25 @@ tasks.named('test') {
     useJUnitPlatform()
 }
 
-// Da dies eine Library ist, kein ausführbares JAR
-bootJar {
+// Library-spezifische Einstellungen
+jar {
+    enabled = true
+    archiveClassifier = '' // Verhindert Namen wie "oneiros-1.0-SNAPSHOT-plain.jar"
+}
+
+// Deaktiviere bootJar komplett, da es kein ausführbares Programm ist
+tasks.named('bootJar') {
     enabled = false
 }
 
-jar {
-    enabled = true
+// Maven Publishing Setup
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            groupId = project.group
+            artifactId = 'oneiros-core'
+            version = project.version
+        }
+    }
 }

@@ -1,4 +1,4 @@
-package io.oneiros;
+package io.oneiros.test;
 
 import io.oneiros.annotation.OneirosEntity;
 import io.oneiros.query.OneirosQuery;
