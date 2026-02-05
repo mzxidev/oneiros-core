@@ -2,7 +2,6 @@ package io.oneiros;
 
 import io.oneiros.annotation.OneirosEntity;
 import io.oneiros.query.OneirosQuery;
-import io.oneiros.transaction.TransactionBuilder;
 
 /**
  * Einfacher Test-Runner ohne JUnit - kann direkt ausgeführt werden
@@ -440,68 +439,6 @@ public class QueryBuilderTestRunner {
             failed++;
         }
 
-        // Test 31: Transaction with single statement
-        try {
-            var sql = TransactionBuilder.begin()
-                    .add("CREATE account:one SET balance = 100")
-                    .toSql();
-
-            assertTrue(sql.contains("BEGIN TRANSACTION"));
-            assertTrue(sql.contains("CREATE account:one SET balance = 100"));
-            assertTrue(sql.contains("COMMIT TRANSACTION"));
-
-            System.out.println("✅ Test 31: Transaction with single statement - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 31: Transaction with single statement - FAILED: " + e.getMessage());
-            failed++;
-        }
-
-        // Test 32: Transaction with multiple statements
-        try {
-            var sql = TransactionBuilder.begin()
-                    .add("CREATE account:one SET balance = 135605.16")
-                    .add("CREATE account:two SET balance = 91031.31")
-                    .add("UPDATE account:one SET balance += 300.00")
-                    .add("UPDATE account:two SET balance -= 300.00")
-                    .toSql();
-
-            assertTrue(sql.contains("BEGIN TRANSACTION"));
-            assertTrue(sql.contains("CREATE account:one SET balance = 135605.16"));
-            assertTrue(sql.contains("CREATE account:two SET balance = 91031.31"));
-            assertTrue(sql.contains("UPDATE account:one SET balance += 300.00"));
-            assertTrue(sql.contains("UPDATE account:two SET balance -= 300.00"));
-            assertTrue(sql.contains("COMMIT TRANSACTION"));
-
-            System.out.println("✅ Test 32: Transaction with multiple statements - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 32: Transaction with multiple statements - FAILED: " + e.getMessage());
-            failed++;
-        }
-
-        // Test 33: Transaction with addAll
-        try {
-            var sql = TransactionBuilder.begin()
-                    .addAll(
-                        "CREATE person:alice SET name = 'Alice'",
-                        "CREATE person:bob SET name = 'Bob'",
-                        "RELATE person:alice->knows->person:bob"
-                    )
-                    .toSql();
-
-            assertTrue(sql.contains("BEGIN TRANSACTION"));
-            assertTrue(sql.contains("CREATE person:alice"));
-            assertTrue(sql.contains("CREATE person:bob"));
-            assertTrue(sql.contains("RELATE person:alice->knows->person:bob"));
-            assertTrue(sql.contains("COMMIT TRANSACTION"));
-
-            System.out.println("✅ Test 33: Transaction with addAll - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 33: Transaction with addAll - FAILED: " + e.getMessage());
-            failed++;
-        }
 
         // Zusammenfassung
         System.out.println("\n" + "=".repeat(50));

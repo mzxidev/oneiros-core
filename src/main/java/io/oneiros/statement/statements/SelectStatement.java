@@ -1,7 +1,8 @@
-package io.oneiros.statement;
+package io.oneiros.statement.statements;
 
 import io.oneiros.annotation.OneirosEntity;
 import io.oneiros.client.OneirosClient;
+import io.oneiros.statement.Statement;
 import io.oneiros.statement.clause.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;

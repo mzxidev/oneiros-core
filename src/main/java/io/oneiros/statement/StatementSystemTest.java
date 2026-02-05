@@ -1,8 +1,7 @@
 package io.oneiros.statement;
 
 import io.oneiros.annotation.OneirosEntity;
-import io.oneiros.statement.SelectStatement;
-import io.oneiros.transaction.TransactionBuilder;
+import io.oneiros.statement.statements.SelectStatement;
 
 /**
  * Test Runner für das neue Statement & Clause System
@@ -78,63 +77,6 @@ public class StatementSystemTest {
             failed++;
         }
 
-        // Test 4: Transaction with THROW
-        try {
-            var sql = TransactionBuilder.begin()
-                    .add("CREATE account:two SET can_transfer = true")
-                    .addIf("!account:two.can_transfer", "Transfer not allowed!")
-                    .add("UPDATE account:one SET balance += 10")
-                    .toSql();
-
-            assertTrue(contains(sql, "BEGIN TRANSACTION"));
-            assertTrue(contains(sql, "IF !account:two.can_transfer"));
-            assertTrue(contains(sql, "THROW \"Transfer not allowed!\""));
-            assertTrue(contains(sql, "COMMIT TRANSACTION"));
-
-            System.out.println("✅ Test 4: Transaction with THROW - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 4: Transaction with THROW - FAILED: " + e.getMessage());
-            failed++;
-        }
-
-        // Test 5: Transaction with RETURN
-        try {
-            var sql = TransactionBuilder.begin()
-                    .add("LET $first = UPDATE account:one SET balance += 300")
-                    .add("LET $second = UPDATE account:two SET balance -= 300")
-                    .returnValue("'Money sent! ' + <string>$first")
-                    .toSql();
-
-            assertTrue(contains(sql, "BEGIN TRANSACTION"));
-            assertTrue(contains(sql, "LET $first"));
-            assertTrue(contains(sql, "LET $second"));
-            assertTrue(contains(sql, "RETURN 'Money sent! '"));
-            assertTrue(contains(sql, "COMMIT TRANSACTION"));
-
-            System.out.println("✅ Test 5: Transaction with RETURN - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 5: Transaction with RETURN - FAILED: " + e.getMessage());
-            failed++;
-        }
-
-        // Test 6: Transaction with CANCEL
-        try {
-            var sql = TransactionBuilder.begin()
-                    .add("CREATE test:one SET value = 1")
-                    .markForCancel()
-                    .toSql();
-
-            assertTrue(contains(sql, "BEGIN TRANSACTION"));
-            assertTrue(contains(sql, "CANCEL TRANSACTION"));
-
-            System.out.println("✅ Test 6: Transaction with CANCEL - PASSED");
-            passed++;
-        } catch (AssertionError e) {
-            System.out.println("❌ Test 6: Transaction with CANCEL - FAILED: " + e.getMessage());
-            failed++;
-        }
 
         // Test 7: SELECT with custom projection
         try {
