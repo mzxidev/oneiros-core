@@ -1,10 +1,8 @@
 package io.oneiros.pool;
 
 import io.oneiros.client.OneirosClient;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
 
 /**
  * Wrapper around an OneirosClient that tracks its health status.
@@ -173,16 +171,15 @@ public class PooledConnection {
     }
 
     /**
-     * Performs a health check by executing a simple query.
+     * Performs a health check using the ping RPC method.
+     * This is more reliable than a query because it doesn't require SQL parsing.
      */
     public Mono<Boolean> healthCheck() {
-        return client.query("SELECT 1", Map.class)
-            .hasElements()
+        return client.ping()
+            .then(Mono.just(true))
             .doOnNext(healthy -> {
                 if (healthy) {
                     resetFailureCount();
-                } else {
-                    incrementFailureCount();
                 }
             })
             .onErrorResume(error -> {
