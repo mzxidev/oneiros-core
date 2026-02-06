@@ -18,6 +18,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 
@@ -121,11 +122,13 @@ public class OneirosAutoConfiguration {
 
         OneirosConnectionPool pool = new OneirosConnectionPool(properties, mapper, breaker, poolSize);
 
-        // 🔥 AUTO-CONNECT: Always establish pool connections on startup
-        pool.connect()
-            .doOnSuccess(v -> log.info("✅ Connection pool initialized and connected"))
-            .doOnError(e -> log.error("❌ Connection pool initialization failed", e))
-            .subscribe();
+        // 🔥 NON-BLOCKING AUTO-CONNECT: Start connections in background
+        // The WebSocket sessions must stay open, so we cannot block here
+        pool.connect().subscribe(
+                null, // onNext
+                error -> log.error("❌ Connection pool initialization failed: {}", error.getMessage(), error),
+                () -> log.info("✅ Connection pool initialized with {} connections", pool.getStats().total())
+        );
 
         return pool;
     }
@@ -167,8 +170,13 @@ public class OneirosAutoConfiguration {
 
         OneirosMigrationEngine engine = new OneirosMigrationEngine(client, basePackage, true, dryRun);
 
-        // Execute migrations after client is connected
-        client.connect()
+        // Wait for pool to be ready before running migrations
+        Mono<Void> waitForReady = client instanceof io.oneiros.pool.OneirosConnectionPool
+            ? ((io.oneiros.pool.OneirosConnectionPool) client).waitUntilReady()
+            : client.connect();
+
+        // Execute migrations after client is ready
+        waitForReady
             .then(engine.migrate())
             .doOnSuccess(v -> log.info("✅ Schema migration completed"))
             .doOnError(e -> log.error("❌ Schema migration failed", e))

@@ -10,8 +10,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -35,6 +37,9 @@ public class OneirosConnectionPool implements OneirosClient {
 
     private volatile boolean initialized = false;
 
+    // Signal when pool is ready to accept queries
+    private final Sinks.One<Void> readySink = Sinks.one();
+
     public OneirosConnectionPool(
             OneirosProperties properties,
             ObjectMapper objectMapper,
@@ -49,35 +54,71 @@ public class OneirosConnectionPool implements OneirosClient {
 
     /**
      * Initializes the connection pool by creating all connections.
+     * Connections are created sequentially to ensure proper initialization.
+     * Blocks until at least one connection is successfully established.
      */
     @Override
     public Mono<Void> connect() {
         if (initialized) {
+            log.debug("Connection pool already initialized, skipping");
             return Mono.empty();
         }
 
         log.info("🏊 Initializing connection pool with {} connections", poolSize);
 
         return Flux.range(0, poolSize)
-            .flatMap(i -> createConnection()
+            .concatMap(i -> createConnection()
                 .doOnSuccess(conn -> {
                     connections.add(conn);
-                    log.info("✅ Connection #{} added to pool", i + 1);
+                    log.info("✅ Connection #{}/{} added to pool", connections.size(), poolSize);
                 })
                 .onErrorResume(error -> {
+                    log.error("Failed to create connection: {}", error.getMessage());
                     log.error("❌ Failed to create connection #{}: {}", i + 1, error.getMessage());
-                    return Mono.empty();
+                    return Mono.empty(); // Continue with other connections even if one fails
                 }))
             .then()
             .doOnSuccess(v -> {
+                if (connections.isEmpty()) {
+                    IllegalStateException error = new IllegalStateException(
+                        "Failed to establish any connections to SurrealDB. " +
+                        "Please check your configuration and that SurrealDB is running.");
+                    readySink.tryEmitError(error);
+                    throw error;
+                }
+
                 initialized = true;
-                log.info("🏊 Connection pool initialized with {}/{} connections",
-                    connections.size(), poolSize);
+                log.info("🏊 Connection pool initialized with {}/{} connections ({}% success rate)",
+                    connections.size(), poolSize, (connections.size() * 100 / poolSize));
+
+                if (connections.size() < poolSize) {
+                    log.warn("⚠️ Pool initialized with fewer connections than requested. " +
+                             "Some connections failed to establish.");
+                }
+
+                // Signal that pool is ready
+                readySink.tryEmitValue(null);
+            })
+            .doOnError(error -> {
+                log.error("❌ Pool initialization failed: {}", error.getMessage());
+                readySink.tryEmitError(error);
             });
     }
 
     /**
-     * Creates a new pooled connection.
+     * Wait until the pool is ready to accept queries.
+     * This is used by clients that need to ensure the pool is initialized before making requests.
+     */
+    public Mono<Void> waitUntilReady() {
+        if (initialized) {
+            return Mono.empty();
+        }
+        return readySink.asMono();
+    }
+
+    /**
+     * Creates a new pooled connection and ensures it's connected.
+     * Sequential execution ensures signin and use complete before next connection.
      */
     private Mono<PooledConnection> createConnection() {
         OneirosWebsocketClient client = new OneirosWebsocketClient(
@@ -87,7 +128,20 @@ public class OneirosConnectionPool implements OneirosClient {
         );
 
         return client.connect()
-            .thenReturn(new PooledConnection(client));
+            .then(Mono.defer(() -> {
+                if (!client.isConnected()) {
+                    return Mono.error(new IllegalStateException("Client failed to establish connection"));
+                }
+                log.debug("✅ New connection established and verified");
+                return Mono.just(new PooledConnection(client));
+            }))
+            .timeout(Duration.ofSeconds(15))
+            .doOnError(e -> {
+                log.error("Failed to create connection: {}", e.getMessage());
+                if (e.getCause() != null) {
+                    log.error("Root cause: {}", e.getCause().getMessage());
+                }
+            });
     }
 
     /**

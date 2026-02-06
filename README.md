@@ -246,12 +246,47 @@ oneiros:
     enabled: true                        # Enable query result caching
     ttl-seconds: 60                     # Cache time-to-live in seconds
   
-  # Connection Pool (optional)
-  connection-pool:
-    enabled: false                       # Enable connection pooling
-    size: 5                              # Number of connections in pool
-    health-check-interval-seconds: 30   # Health check interval
-    reconnect-delay-seconds: 5          # Reconnection delay
+  # Connection Pool (Production Recommended)
+  pool:
+    enabled: false                       # Enable connection pool (default: false)
+    size: 10                            # Number of connections (default: 5)
+    auto-reconnect: true                # Auto-reconnect failed connections
+    health-check-interval: 30           # Health check interval in seconds
+    
+  # Performance & Resilience
+  circuit-breaker:
+    enabled: true                        # Enable circuit breaker for resilience
+    failure-rate-threshold: 50          # Percentage of failures to open circuit
+    wait-duration-in-open-state: 30s    # Wait time before half-open state
+    sliding-window-size: 100            # Number of calls to track
+
+  # Schema Migration
+  migration:
+    enabled: true                        # Auto-generate schema from entities
+    base-package: "com.yourapp"         # Package to scan for @OneirosEntity
+    dry-run: false                      # If true, only logs schema without applying
+```
+
+### ⚠️ Important Notes
+
+#### **Connection Pool Behavior**
+When using connection pooling (`oneiros.pool.enabled=true`):
+- The pool initializes **asynchronously** in the background
+- WebSocket connections stay open for the lifetime of the application
+- Migrations wait for at least one connection to be ready before executing
+- If all initial connections fail, the application will start but queries will fail until connections are established
+
+#### **WebSocket Connection Lifecycle**
+- Connections are established once and kept alive
+- The pool automatically monitors connection health via periodic health checks
+- Failed connections are detected and reconnected automatically (if `auto-reconnect: true`)
+- Each connection maintains its own session state (authentication, namespace/database selection)
+
+#### **Performance Recommendations**
+- **Single Application**: Use `pool.enabled: false` for simplicity
+- **High Load / Production**: Use `pool.enabled: true` with `pool.size: 5-10`
+- **Adjust pool size** based on your concurrent request load
+- Monitor pool stats via `OneirosConnectionPool.getStats()`
 ```
 
 ### Connection Modes
@@ -874,6 +909,50 @@ GET /actuator/health
 
 ## 🔥 Advanced Features
 
+### 🏊 Connection Pooling
+
+For production applications with high traffic, enable connection pooling for improved performance and resilience.
+
+#### Enable Connection Pool
+
+```yaml
+oneiros:
+  pool:
+    enabled: true          # Enable connection pool
+    size: 10              # Number of connections
+    auto-reconnect: true  # Auto-reconnect on failure
+    health-check-interval: 30  # Health check every 30s
+```
+
+#### Features
+
+✅ **Load Balancing** - Round-robin distribution across connections  
+✅ **Automatic Failover** - Queries redirected to healthy connections  
+✅ **Health Monitoring** - Continuous connection health checks  
+✅ **Auto-Recovery** - Failed connections automatically reconnected  
+✅ **Circuit Breaker** - Protects against cascading failures  
+
+#### Monitor Pool Health
+
+```java
+@RestController
+@RequestMapping("/api/health")
+public class HealthController {
+
+    private final OneirosConnectionPool pool;
+
+    @GetMapping("/pool")
+    public PoolStats getPoolStats() {
+        return pool.getStats();
+        // Returns: { total: 10, healthy: 9, unhealthy: 1, maxSize: 10 }
+    }
+}
+```
+
+📖 **Full Documentation:** [CONNECTION_POOL_GUIDE.md](CONNECTION_POOL_GUIDE.md)
+
+---
+
 ### Transactions
 
 Execute multiple statements atomically using transactions.
@@ -1464,6 +1543,43 @@ logging:
 curl http://localhost:8080/actuator/health
 ```
 
+#### ❌ Problem: "Did not observe any item or terminal signal within 10000ms" / Connection Pool Timeout
+
+**Symptoms:**
+```
+ERROR: Failed to create connection: Did not observe any item or terminal signal within 10000ms
+Pool: PoolStats[total=0, healthy=0, unhealthy=0, maxSize=10]
+```
+
+**Cause:** This was a bug in versions before v0.2.1 where WebSocket connections were established but the initialization never completed. **Fixed in v0.2.1+**
+
+**Solutions:**
+
+1️⃣ **Update to v0.2.1 or later:**
+```gradle
+implementation 'com.github.mzxidev:oneiros-core:v0.2.1'  // or later
+```
+
+2️⃣ **If using older version, check:**
+```yaml
+# Ensure credentials are correct
+oneiros:
+  username: root  # Must match SurrealDB user
+  password: root  # Must match SurrealDB password
+
+# Verify SurrealDB is responding
+```
+
+3️⃣ **Debug with smaller pool size:**
+```yaml
+oneiros:
+  pool:
+    size: 2  # Start small to isolate issues
+```
+
+4️⃣ **Check the detailed fix documentation:**
+See [CONNECTION_POOL_FIX.md](CONNECTION_POOL_FIX.md) for technical details on the root cause and solution.
+
 #### ❌ Problem: Connection Works in Tests but Not in Application
 
 **Cause:** Configuration not loaded from `application.yml`
@@ -1523,6 +1639,88 @@ userRepository.findById(userId)
     .map(User::getName)
     .subscribe(name -> System.out.println(name));
 ```
+
+### Connection Pool Timeout Errors
+
+**Problem**: Connection pool fails to initialize with timeout errors:
+```
+Failed to create connection: Did not observe any item or terminal signal within 15000ms
+```
+
+**Causes & Solutions**:
+
+1. **SurrealDB Not Running**
+   ```bash
+   # Start SurrealDB
+   surreal start --user root --pass root --bind 0.0.0.0:8000
+   ```
+
+2. **Wrong Connection Details**
+   ```yaml
+   oneiros:
+     url: ws://127.0.0.1:8000/rpc  # Check IP and port
+     username: root
+     password: root
+     namespace: your_namespace  # Must exist
+     database: your_database    # Must exist
+   ```
+
+3. **Network/Firewall Issues**
+   ```bash
+   # Test connection manually
+   curl http://localhost:8000/health
+   ```
+
+4. **Pool Size Too Large**
+   ```yaml
+   oneiros:
+     connection-pool:
+       size: 5  # Reduce if you have connection limits
+   ```
+
+### Connection Pool Stats Show 0 Connections
+
+**Problem**: Pool stats show `PoolStats[total=0, healthy=0, unhealthy=0, maxSize=10]`
+
+**Solution**: This happens during startup. Check logs for initialization errors:
+```bash
+# Look for these log lines:
+✅ Connection initialization complete  # Should appear for each connection
+🏊 Connection pool initialized with X/Y connections
+```
+
+### "No connections available in pool" at Runtime
+
+**Problem**: Queries fail with `No connections available in pool`
+
+**Cause**: All connections became unhealthy or were not established
+
+**Solutions**:
+
+1. **Enable Health Checks**:
+   ```yaml
+   oneiros:
+     connection-pool:
+       health-check-interval: 30s  # Check connections regularly
+       enable-auto-reconnect: true
+   ```
+
+2. **Check Pool Stats Endpoint**:
+   ```bash
+   curl http://localhost:8080/actuator/health/oneiros
+   ```
+
+3. **Review Connection Lifecycle**:
+   ```java
+   @Autowired
+   private OneirosConnectionPool pool;
+   
+   public void checkPoolHealth() {
+       PoolStats stats = pool.getStats();
+       log.info("Pool: {}", stats);
+       // If healthy = 0, connections died and need recovery
+   }
+   ```
 
 ---
 

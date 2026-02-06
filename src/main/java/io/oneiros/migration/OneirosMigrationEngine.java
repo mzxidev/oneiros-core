@@ -48,6 +48,7 @@ public class OneirosMigrationEngine {
 
     /**
      * Scan and execute migrations for all @OneirosEntity classes.
+     * Executes statements sequentially to avoid transaction conflicts.
      *
      * @return Mono<Void> indicating completion
      */
@@ -61,14 +62,24 @@ public class OneirosMigrationEngine {
 
         return Mono.fromCallable(this::scanEntities)
             .flatMapMany(Flux::fromIterable)
-            .flatMap(this::generateSchemaForEntity)
-            .flatMap(sql -> {
+            .concatMap(this::generateSchemaForEntity)  // Sequential entity processing
+            .concatMap(sql -> {  // Sequential statement execution to avoid conflicts
                 if (dryRun) {
                     log.info("📝 [DRY-RUN] Would execute: {}", sql);
                     return Mono.empty();
                 } else {
                     log.debug("📤 Executing: {}", sql);
-                    return client.query(sql, Object.class).then();
+                    return client.query(sql, Object.class)
+                        .then()
+                        .onErrorResume(e -> {
+                            // Log but don't fail on "already exists" errors for idempotency
+                            String msg = e.getMessage();
+                            if (msg != null && (msg.contains("already exists") || msg.contains("OVERWRITE"))) {
+                                log.debug("⏭️ Skipping (already exists): {}", sql);
+                                return Mono.empty();
+                            }
+                            return Mono.error(e);
+                        });
                 }
             })
             .then()
@@ -159,10 +170,11 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE TABLE statement.
+     * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
      */
     private String generateDefineTable(Class<?> entityClass, String tableName) {
         StringBuilder sql = new StringBuilder();
-        sql.append("DEFINE TABLE ").append(tableName);
+        sql.append("DEFINE TABLE IF NOT EXISTS ").append(tableName);
 
         OneirosTable tableAnnotation = entityClass.getAnnotation(OneirosTable.class);
 
@@ -191,10 +203,11 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE FIELD statement.
+     * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
      */
     private String generateDefineField(Field field, String tableName) {
         StringBuilder sql = new StringBuilder();
-        sql.append("DEFINE FIELD ").append(field.getName());
+        sql.append("DEFINE FIELD IF NOT EXISTS ").append(field.getName());
         sql.append(" ON TABLE ").append(tableName);
 
         String surrealType = null;
@@ -250,6 +263,7 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE INDEX statement.
+     * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
      */
     private String generateDefineIndex(Field field, String tableName, OneirosField fieldAnnotation) {
         StringBuilder sql = new StringBuilder();
@@ -258,7 +272,7 @@ public class OneirosMigrationEngine {
             ? "idx_" + tableName + "_" + field.getName()
             : fieldAnnotation.indexName();
 
-        sql.append("DEFINE INDEX ").append(indexName);
+        sql.append("DEFINE INDEX IF NOT EXISTS ").append(indexName);
         sql.append(" ON TABLE ").append(tableName);
         sql.append(" FIELDS ").append(field.getName());
 
@@ -271,6 +285,7 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate schema for versioned entities.
+     * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
      */
     private List<String> generateVersionedSchema(Class<?> entityClass, String tableName) {
         List<String> statements = new ArrayList<>();
@@ -284,12 +299,12 @@ public class OneirosMigrationEngine {
 
         // Create history table
         StringBuilder sql = new StringBuilder();
-        sql.append("DEFINE TABLE ").append(historyTable).append(" SCHEMALESS");
+        sql.append("DEFINE TABLE IF NOT EXISTS ").append(historyTable).append(" SCHEMALESS");
         statements.add(sql.toString());
 
         // Create event to track changes
         sql = new StringBuilder();
-        sql.append("DEFINE EVENT ").append(tableName).append("_history_event");
+        sql.append("DEFINE EVENT IF NOT EXISTS ").append(tableName).append("_history_event");
         sql.append(" ON TABLE ").append(tableName);
         sql.append(" WHEN $event = 'UPDATE' OR $event = 'DELETE'");
         sql.append(" THEN {");
@@ -407,6 +422,7 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE ANALYZER and DEFINE INDEX for full-text search.
+     * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
      */
     private List<String> generateFullTextIndex(Field field, String tableName) {
         List<String> statements = new ArrayList<>();
@@ -424,7 +440,7 @@ public class OneirosMigrationEngine {
         // 1. DEFINE ANALYZER (only if not 'ascii' which is built-in)
         if (!"ascii".equals(analyzer)) {
             StringBuilder analyzerSql = new StringBuilder();
-            analyzerSql.append("DEFINE ANALYZER ").append(analyzer);
+            analyzerSql.append("DEFINE ANALYZER IF NOT EXISTS ").append(analyzer);
             analyzerSql.append(" TOKENIZERS blank, class");
             analyzerSql.append(" FILTERS lowercase, ").append(analyzer);
             statements.add(analyzerSql.toString());
@@ -432,7 +448,7 @@ public class OneirosMigrationEngine {
 
         // 2. DEFINE INDEX with SEARCH
         StringBuilder indexSql = new StringBuilder();
-        indexSql.append("DEFINE INDEX ").append(indexName);
+        indexSql.append("DEFINE INDEX IF NOT EXISTS ").append(indexName);
         indexSql.append(" ON TABLE ").append(tableName);
         indexSql.append(" FIELDS ").append(fieldName);
         indexSql.append(" SEARCH ANALYZER ").append(analyzer);
