@@ -1,0 +1,133 @@
+# =============================================================================
+# Oneiros Configuration Example
+# Complete configuration for all features
+# =============================================================================
+
+oneiros:
+  # Database Connection
+  url: ws://localhost:8000/rpc
+  namespace: my_namespace
+  database: my_database
+  username: root
+  password: root
+  auto-connect: true       # Connect immediately on startup (recommended: true)
+
+  # Security & Encryption
+  security:
+    enabled: true
+    key: "my-super-secret-encryption-key-must-be-at-least-16-chars"
+
+  # Cache Configuration
+  cache:
+    enabled: true
+    ttl-seconds: 60        # Cache TTL in seconds
+    max-size: 10000        # Max number of cached objects
+
+  # Connection Pool Configuration
+  pool:
+    enabled: true          # Enable connection pooling
+    size: 5                # Number of WebSocket connections in the pool
+    min-idle: 2            # Minimum number of idle connections to maintain
+    max-wait-seconds: 30   # Maximum time to wait for a connection from the pool
+    health-check-interval: 30  # Health check interval in seconds
+    auto-reconnect: true   # Automatically reconnect dead connections
+
+  # Migration & Schema Auto-Generation
+  migration:
+    enabled: true          # Enable auto-migration
+    base-package: io.oneiros  # Base package to scan for @OneirosEntity classes
+    dry-run: false         # If true, only logs SQL without executing
+
+# =============================================================================
+# Spring WebFlux Configuration (optional)
+# =============================================================================
+spring:
+  application:
+    name: oneiros-app
+
+  # Logging
+  logging:
+    level:
+      io.oneiros: DEBUG    # Enable debug logging for Oneiros
+      reactor.netty: INFO
+
+# =============================================================================
+# Example configurations for different environments
+# =============================================================================
+
+---
+# Development Profile
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+oneiros:
+  url: ws://localhost:8000/rpc
+  namespace: dev_namespace
+  database: dev_db
+  username: root
+  password: root
+  migration:
+    enabled: true
+    dry-run: false
+  security:
+    enabled: true
+  pool:
+    enabled: true
+    size: 3              # Smaller pool for development
+    min-idle: 1
+    health-check-interval: 60
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+oneiros:
+  url: ws://production-server:8000/rpc
+  namespace: prod_namespace
+  database: prod_db
+  username: ${SURREAL_USER}
+  password: ${SURREAL_PASS}
+  migration:
+    enabled: true
+    dry-run: false  # Change to true for safety checks first
+  security:
+    enabled: true
+    key: ${ENCRYPTION_KEY}
+  cache:
+    enabled: true
+    ttl-seconds: 300
+    max-size: 50000
+  pool:
+    enabled: true
+    size: 10             # Larger pool for production
+    min-idle: 3
+    max-wait-seconds: 30
+    health-check-interval: 30
+    auto-reconnect: true
+
+---
+# Testing Profile (no auto-migration)
+spring:
+  config:
+    activate:
+      on-profile: test
+
+oneiros:
+  url: ws://localhost:8000/rpc
+  namespace: test_namespace
+  database: test_db
+  username: root
+  password: root
+  migration:
+    enabled: false  # Disable auto-migration for tests
+  security:
+    enabled: false  # Disable encryption for faster tests
+  cache:
+    enabled: false  # Disable cache for tests
+  pool:
+    enabled: false  # Disable pooling for simpler tests

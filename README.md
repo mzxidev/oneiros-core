@@ -234,6 +234,7 @@ oneiros:
   password: "root"                       # Database password
   namespace: "my_namespace"              # SurrealDB namespace
   database: "my_database"                # SurrealDB database
+  auto-connect: true                     # Connect on startup (default: true)
   
   # Security Settings
   security:
@@ -244,6 +245,61 @@ oneiros:
   cache:
     enabled: true                        # Enable query result caching
     ttl-seconds: 60                     # Cache time-to-live in seconds
+  
+  # Connection Pool (optional)
+  connection-pool:
+    enabled: false                       # Enable connection pooling
+    size: 5                              # Number of connections in pool
+    health-check-interval-seconds: 30   # Health check interval
+    reconnect-delay-seconds: 5          # Reconnection delay
+```
+
+### Connection Modes
+
+Oneiros supports two connection modes:
+
+#### **Auto-Connect (Recommended)**
+```yaml
+oneiros:
+  auto-connect: true  # Connect immediately on startup
+```
+✅ **Benefits:**
+- Fails fast on startup if configuration is wrong
+- Connection ready immediately for first request
+- Shows clear connection status in startup logs
+
+#### **Lazy Connect**
+```yaml
+oneiros:
+  auto-connect: false  # Connect on first request
+```
+⚠️ **Use Cases:**
+- When SurrealDB might not be available on startup
+- For applications with optional database features
+
+### Health Monitoring
+
+Once configured, you can check connection status via:
+
+**Spring Boot Actuator:**
+```bash
+curl http://localhost:8080/actuator/health
+```
+
+Response:
+```json
+{
+  "status": "UP",
+  "components": {
+    "oneirosHealthIndicator": {
+      "status": "UP",
+      "details": {
+        "status": "Connected",
+        "type": "OneirosWebsocketClient"
+      }
+    }
+  }
+}
 ```
 
 ### Environment Variables
@@ -1350,18 +1406,88 @@ OneirosQuery.select(User.class)
 
 ### Connection Issues
 
-**Problem**: `WebSocketException: Connection refused`
+#### ❌ Problem: `WebSocketException: Connection refused` or No Connection on Startup
 
-**Solution**:
-1. Ensure SurrealDB is running:
-   ```bash
-   surreal start --user root --pass root
-   ```
-2. Check WebSocket URL in `application.yml`:
-   ```yaml
-   oneiros:
-     url: "ws://127.0.0.1:8000/rpc"
-   ```
+**Symptoms:**
+```
+❌ Oneiros connection failed: Connection refused
+⚠️ Oneiros is NOT connected to SurrealDB!
+```
+
+**Solutions:**
+
+1️⃣ **Check if SurrealDB is running:**
+```bash
+# Start SurrealDB
+surreal start --user root --pass root
+
+# Or with Docker
+docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
+```
+
+2️⃣ **Verify configuration in `application.yml`:**
+```yaml
+oneiros:
+  url: "ws://127.0.0.1:8000/rpc"  # Check port and protocol (ws://)
+  username: "root"                 # Must match SurrealDB credentials
+  password: "root"
+  namespace: "my_namespace"        # Must exist or be creatable
+  database: "my_database"
+  auto-connect: true               # Enable for immediate connection
+```
+
+3️⃣ **Check Spring Boot auto-configuration:**
+```java
+// If using local JAR, ensure @ComponentScan includes Oneiros:
+@SpringBootApplication
+@ComponentScan(basePackages = {
+    "your.package",
+    "io.oneiros"  // Add this!
+})
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+```
+
+4️⃣ **Enable debug logging:**
+```yaml
+logging:
+  level:
+    io.oneiros: DEBUG
+    reactor.netty: DEBUG
+```
+
+5️⃣ **Check actuator health endpoint:**
+```bash
+curl http://localhost:8080/actuator/health
+```
+
+#### ❌ Problem: Connection Works in Tests but Not in Application
+
+**Cause:** Configuration not loaded from `application.yml`
+
+**Solution:**
+```java
+// Ensure @EnableConfigurationProperties is present:
+@SpringBootApplication
+@EnableConfigurationProperties(OneirosProperties.class)
+public class Application { }
+```
+
+#### ❌ Problem: "Session not available after connect"
+
+**Cause:** Connection pool exhausted or all connections unhealthy
+
+**Solution:**
+```yaml
+oneiros:
+  connection-pool:
+    enabled: true
+    size: 10          # Increase pool size
+    health-check-interval-seconds: 30
+```
 
 ### Encryption Errors
 

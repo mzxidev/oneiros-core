@@ -38,6 +38,13 @@ public class OneirosProperties {
      */
     private String password;
 
+    /**
+     * Auto-connect on startup (default: true).
+     * If true, connection to SurrealDB is established immediately when the application starts.
+     * If false, connection is established lazily on the first request.
+     */
+    private boolean autoConnect = true;
+
     private Security security = new Security();
 
     @Setter
@@ -52,7 +59,7 @@ public class OneirosProperties {
 
     private Migration migration = new Migration();
 
-    private ConnectionPool connectionPool = new ConnectionPool();
+    private Pool pool = new Pool();
 
     @Setter
     @Getter
@@ -72,10 +79,12 @@ public class OneirosProperties {
 
     @Setter
     @Getter
-    public static class ConnectionPool {
+    public static class Pool {
         private boolean enabled = false;
         private int size = 5;
-        private long healthCheckIntervalSeconds = 30;
-        private long reconnectDelaySeconds = 5;
+        private int minIdle = 2;
+        private int maxWaitSeconds = 30;
+        private long healthCheckInterval = 30;
+        private boolean autoReconnect = true;
     }
 }

@@ -83,34 +83,47 @@ public class OneirosAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(name = "oneiros.connection-pool.enabled", havingValue = "false", matchIfMissing = true)
+    @ConditionalOnProperty(name = "oneiros.pool.enabled", havingValue = "false", matchIfMissing = true)
     public OneirosClient oneirosClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker breaker) {
         OneirosWebsocketClient client = new OneirosWebsocketClient(properties, mapper, breaker);
 
-        System.out.println(YELLOW + "⏳ Oneiros wird beim ersten Request verbunden..." + RESET);
+        // 🔥 AUTO-CONNECT: Establish connection immediately on startup
+        if (properties.isAutoConnect()) {
+            System.out.println(GREEN + "🚀 Oneiros auto-connecting to SurrealDB..." + RESET);
+            client.connect()
+                .doOnSuccess(v -> System.out.println(GREEN + "✅ Oneiros connected successfully!" + RESET))
+                .doOnError(e -> System.err.println(RED + "❌ Oneiros connection failed: " + e.getMessage() + RESET))
+                .subscribe();
+        } else {
+            System.out.println(YELLOW + "⏳ Oneiros will connect on first request (lazy mode)" + RESET);
+        }
 
         return client;
     }
 
     /**
      * Connection Pool bean - manages multiple WebSocket connections for load balancing.
-     * Enabled with: oneiros.connection-pool.enabled=true
+     * Enabled with: oneiros.pool.enabled=true
      */
     @Bean
-    @ConditionalOnProperty(name = "oneiros.connection-pool.enabled", havingValue = "true")
+    @ConditionalOnProperty(name = "oneiros.pool.enabled", havingValue = "true")
     public OneirosClient oneirosConnectionPool(
             OneirosProperties properties,
             ObjectMapper mapper,
-            CircuitBreaker breaker,
-            @Value("${oneiros.connection-pool.size:5}") int poolSize) {
+            CircuitBreaker breaker) {
+
+        int poolSize = properties.getPool().getSize();
 
         log.info("🏊 Initializing Oneiros Connection Pool");
         log.info("   📊 Pool size: {}", poolSize);
+        log.info("   🔄 Auto-reconnect: {}", properties.getPool().isAutoReconnect());
+        log.info("   ❤️ Health check interval: {}s", properties.getPool().getHealthCheckInterval());
 
         OneirosConnectionPool pool = new OneirosConnectionPool(properties, mapper, breaker, poolSize);
 
+        // 🔥 AUTO-CONNECT: Always establish pool connections on startup
         pool.connect()
-            .doOnSuccess(v -> log.info("✅ Connection pool initialized"))
+            .doOnSuccess(v -> log.info("✅ Connection pool initialized and connected"))
             .doOnError(e -> log.error("❌ Connection pool initialization failed", e))
             .subscribe();
 
