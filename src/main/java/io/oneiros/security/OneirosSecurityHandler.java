@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InaccessibleObjectException;
 import java.util.*;
 
 /**
@@ -89,8 +90,9 @@ public class OneirosSecurityHandler {
         }
 
         try {
-            // Process all fields in-place
-            processFields(entity, true);
+            // Process all fields with circular reference protection
+            Set<Object> visited = new HashSet<>();
+            processFields(entity, true, visited);
 
             log.debug("🔐 Encrypted entity: {}", entity.getClass().getSimpleName());
             return entity;
@@ -117,8 +119,9 @@ public class OneirosSecurityHandler {
         }
 
         try {
-            // Process all fields (decrypt in-place)
-            processFields(entity, false);
+            // Process all fields with circular reference protection
+            Set<Object> visited = new HashSet<>();
+            processFields(entity, false, visited);
 
             log.debug("🔓 Decrypted entity: {}", entity.getClass().getSimpleName());
             return entity;
@@ -135,30 +138,60 @@ public class OneirosSecurityHandler {
      *
      * @param entity The entity to process
      * @param encrypt true to encrypt, false to decrypt
+     * @param visited Set of already visited objects to prevent circular references
      */
-    private void processFields(Object entity, boolean encrypt) throws Exception {
+    private void processFields(Object entity, boolean encrypt, Set<Object> visited) throws Exception {
         if (entity == null) {
             return;
         }
 
         Class<?> clazz = entity.getClass();
 
-        // Skip primitive types and common immutable types
+        // Skip primitive types and common immutable types (BEFORE checking visited)
         if (isPrimitiveOrWrapper(clazz) || clazz == String.class) {
+            return;
+        }
+
+        // Skip Enums (BEFORE checking visited - causes InaccessibleObjectException)
+        if (clazz.isEnum() || entity instanceof Enum<?>) {
+            return;
+        }
+
+        // Skip Java internal classes (java.*, javax.*) BEFORE checking visited
+        if (clazz.getName().startsWith("java.") || clazz.getName().startsWith("javax.")) {
+            return;
+        }
+
+        // Skip collection types to avoid deep traversal (BEFORE checking visited)
+        if (entity instanceof java.util.Collection || entity instanceof java.util.Map) {
+            return;
+        }
+
+        // NOW check if already visited (circular reference protection)
+        // Use identity-based comparison to handle properly
+        if (!visited.add(entity)) {
+            log.trace("🔄 Skipping already visited object: {}", clazz.getSimpleName());
             return;
         }
 
         // Process all declared fields (including private)
         for (Field field : getAllFields(clazz)) {
-            field.setAccessible(true);
+            if (!safeSetAccessible(field)) {
+                continue; // Skip fields that cannot be accessed
+            }
 
             if (field.isAnnotationPresent(OneirosEncrypted.class)) {
                 processEncryptedField(entity, field, encrypt);
             } else {
                 // Recursively process nested objects
-                Object value = field.get(entity);
-                if (value != null && !isPrimitiveOrWrapper(value.getClass()) && value.getClass() != String.class) {
-                    processFields(value, encrypt);
+                try {
+                    Object value = field.get(entity);
+                    if (value != null && !isPrimitiveOrWrapper(value.getClass()) && value.getClass() != String.class) {
+                        processFields(value, encrypt, visited);
+                    }
+                } catch (Exception e) {
+                    // Ignore reflection errors on nested objects
+                    log.trace("⚠️ Cannot access nested field {}, skipping", field.getName());
                 }
             }
         }
@@ -240,7 +273,10 @@ public class OneirosSecurityHandler {
 
         // Copy all fields
         for (Field field : getAllFields(clazz)) {
-            field.setAccessible(true);
+            if (!safeSetAccessible(field)) {
+                continue; // Skip fields that cannot be accessed
+            }
+
             Object value = field.get(entity);
 
             if (value != null) {
@@ -280,6 +316,23 @@ public class OneirosSecurityHandler {
                clazz == Long.class ||
                clazz == Float.class ||
                clazz == Double.class;
+    }
+
+    /**
+     * Safely makes a field accessible, catching Java Module System exceptions.
+     *
+     * @param field The field to make accessible
+     * @return true if successful, false if blocked by Module System
+     */
+    private boolean safeSetAccessible(Field field) {
+        try {
+            field.setAccessible(true);
+            return true;
+        } catch (InaccessibleObjectException e) {
+            // Java Module System blocks access (e.g., java.base internal classes)
+            log.trace("🔒 Cannot access field {} (Module System protection)", field.getName());
+            return false;
+        }
     }
 
 }
