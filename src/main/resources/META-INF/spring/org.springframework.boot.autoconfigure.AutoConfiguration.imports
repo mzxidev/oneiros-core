@@ -1,1 +1,2 @@
 io.oneiros.config.OneirosAutoConfiguration
+io.oneiros.config.OneirosBackupAutoConfiguration

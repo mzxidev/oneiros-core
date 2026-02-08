@@ -54,7 +54,16 @@ public @interface OneirosField {
 
     /**
      * Custom assertion (SurrealQL expression).
-     * Example: "$value > 0", "$value.length() > 5"
+     *
+     * <p><b>IMPORTANT:</b> Use SurrealDB functions, NOT JavaScript methods!
+     * <ul>
+     *   <li>✅ Correct: "string::len($value) > 5"</li>
+     *   <li>❌ Wrong: "$value.length() > 5"</li>
+     *   <li>✅ Correct: "$value > 0"</li>
+     *   <li>✅ Correct: "string::is::email($value)"</li>
+     * </ul>
+     *
+     * @see <a href="https://surrealdb.com/docs/surrealql/functions/string">SurrealDB String Functions</a>
      */
     String assertion() default "";
 
@@ -62,4 +71,21 @@ public @interface OneirosField {
      * Optional comment for the field.
      */
     String comment() default "";
+
+    /**
+     * If true, the field is optional (nullable).
+     * Generates SurrealDB type: option<type>
+     *
+     * <p>Example:
+     * <pre>
+     * {@code
+     * @OneirosField(optional = true)
+     * private String avatarUrl;  // Will be: TYPE option<string>
+     * }
+     * </pre>
+     *
+     * <p>Note: This is important for fields that may be null in Java.
+     * SurrealDB will reject NONE values for non-optional fields.
+     */
+    boolean optional() default false;
 }

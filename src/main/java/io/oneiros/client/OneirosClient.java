@@ -347,6 +347,104 @@ public interface OneirosClient {
      * @return Mono<Void> signaling completion
      */
     Mono<Void> kill(String liveQueryId);
+
+    // ============================================================
+    // DEDICATED CONNECTION ACCESS
+    // ============================================================
+
+    /**
+     * Returns a dedicated single connection for sequential operations.
+     * For pooled clients, this returns one fixed connection.
+     * For single clients, returns the client itself.
+     *
+     * <p>Use this for operations that require sequential execution on the same connection,
+     * such as schema migrations, transactions, or stateful operations.
+     *
+     * @return A single OneirosClient instance that won't switch connections
+     */
+    default OneirosClient dedicated() {
+        // Default: for single connections, return self
+        return this;
+    }
+
+    // ============================================================
+    // TRANSACTIONS
+    // ============================================================
+
+    /**
+     * Executes a block of code within an ACID transaction.
+     *
+     * <p><strong>Transaction Guarantees:</strong>
+     * <ul>
+     *   <li>All operations execute on the same WebSocket connection</li>
+     *   <li>Operations are serialized (sequential execution)</li>
+     *   <li>Automatic COMMIT on successful completion</li>
+     *   <li>Automatic ROLLBACK (CANCEL) on any error</li>
+     * </ul>
+     *
+     * <p><strong>Usage Example (Money Transfer):</strong>
+     * <pre>{@code
+     * client.transaction(tx -> {
+     *     return tx.query("UPDATE account:sender SET balance -= 100", Map.class)
+     *              .then(tx.query("UPDATE account:receiver SET balance += 100", Map.class).next())
+     *              .then(tx.create("transaction",
+     *                  Map.of("amount", 100, "from", "sender", "to", "receiver"),
+     *                  Map.class));
+     * }).subscribe(
+     *     result -> log.info("✅ Transaction committed: {}", result),
+     *     error -> log.error("❌ Transaction rolled back: {}", error.getMessage())
+     * );
+     * }</pre>
+     *
+     * <p><strong>Multi-Step Example:</strong>
+     * <pre>{@code
+     * client.transaction(tx -> {
+     *     return tx.query("SELECT * FROM account:sender", Map.class).next()
+     *              .flatMap(sender -> {
+     *                  double balance = (Double) sender.get("balance");
+     *                  if (balance < 100) {
+     *                      return Mono.error(new IllegalStateException("Insufficient funds"));
+     *                  }
+     *                  return tx.query("UPDATE account:sender SET balance -= 100", Map.class).next();
+     *              })
+     *              .then(tx.query("UPDATE account:receiver SET balance += 100", Map.class).next());
+     * }).subscribe();
+     * }</pre>
+     *
+     * <p><strong>Isolation Level:</strong> SurrealDB uses optimistic concurrency control.
+     * If concurrent modifications conflict, the transaction will fail and should be retried.
+     *
+     * @param transactionBlock Function that receives a transaction context and returns a Mono
+     * @param <T> Result type
+     * @return Mono that emits the transaction result or error
+     * @see io.oneiros.transaction.OneirosTransaction
+     * @see <a href="https://surrealdb.com/docs/surrealdb/surrealql/transactions">SurrealDB Transactions</a>
+     */
+    <T> Mono<T> transaction(java.util.function.Function<io.oneiros.transaction.OneirosTransaction, Mono<T>> transactionBlock);
+
+    /**
+     * Executes a block of code within an ACID transaction (Flux variant).
+     *
+     * <p>Use this when your transaction produces multiple results (Flux).
+     *
+     * <p><strong>Usage Example (Batch Operations):</strong>
+     * <pre>{@code
+     * client.transactionMany(tx -> {
+     *     return Flux.range(1, 100)
+     *         .flatMap(i -> tx.create("record", Map.of("id", i), Map.class));
+     * }).subscribe(
+     *     record -> log.info("Inserted: {}", record),
+     *     error -> log.error("Transaction failed: {}", error.getMessage()),
+     *     () -> log.info("✅ All 100 records committed")
+     * );
+     * }</pre>
+     *
+     * @param transactionBlock Function that receives a transaction context and returns a Flux
+     * @param <T> Result type
+     * @return Flux that emits transaction results or error
+     * @see io.oneiros.transaction.OneirosTransaction
+     */
+    <T> Flux<T> transactionMany(java.util.function.Function<io.oneiros.transaction.OneirosTransaction, Flux<T>> transactionBlock);
 }
 
 

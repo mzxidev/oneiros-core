@@ -12,7 +12,6 @@ import io.oneiros.migration.OneirosMigrationEngine;
 import io.oneiros.pool.OneirosConnectionPool;
 import io.oneiros.security.CryptoService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -25,7 +24,6 @@ import java.time.Duration;
 @Slf4j
 @Configuration
 @EnableConfigurationProperties(OneirosProperties.class)
-@org.springframework.scheduling.annotation.EnableScheduling
 public class OneirosAutoConfiguration {
 
     // ANSI Colors für die Konsole
@@ -37,29 +35,48 @@ public class OneirosAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    @org.springframework.context.annotation.Primary
     public ObjectMapper objectMapper() {
-        return new ObjectMapper();
+        // Use SurrealDB-compatible ObjectMapper with datetime handling
+        return OneirosJacksonConfig.createSurrealObjectMapper();
     }
 
     @Bean
-    public CircuitBreakerRegistry circuitBreakerRegistry() {
-        // Konfiguration des Schutzschilds
+    public CircuitBreakerRegistry circuitBreakerRegistry(OneirosProperties properties) {
+        var cbConfig = properties.getCircuitBreaker();
+
+        // Konfiguration des Schutzschilds aus Properties
         CircuitBreakerConfig config = CircuitBreakerConfig.custom()
-                .failureRateThreshold(50) // Wenn 50% der Requests fehlschlagen...
-                .waitDurationInOpenState(Duration.ofSeconds(5)) // ...warte 5 Sekunden (Cool-down)
-                .permittedNumberOfCallsInHalfOpenState(3) // ...dann teste mit 3 Requests
-                .slidingWindowSize(10) // ...basierend auf den letzten 10 Anfragen
-                .minimumNumberOfCalls(5) // ...aber erst ab 5 Requests bewerten
+                .failureRateThreshold(cbConfig.getFailureRateThreshold()) // Wenn X% der Requests fehlschlagen...
+                .waitDurationInOpenState(Duration.ofSeconds(cbConfig.getWaitDurationInOpenState())) // ...warte X Sekunden (Cool-down)
+                .permittedNumberOfCallsInHalfOpenState(cbConfig.getPermittedCallsInHalfOpenState()) // ...dann teste mit X Requests
+                .slidingWindowSize(cbConfig.getSlidingWindowSize()) // ...basierend auf den letzten X Anfragen
+                .minimumNumberOfCalls(cbConfig.getMinimumNumberOfCalls()) // ...aber erst ab X Requests bewerten
+                .slowCallDurationThreshold(Duration.ofMillis(cbConfig.getSlowCallDurationThreshold()))
+                .slowCallRateThreshold(cbConfig.getSlowCallRateThreshold())
                 .build();
 
         return CircuitBreakerRegistry.of(config);
     }
 
     @Bean
-    public CircuitBreaker oneirosCircuitBreaker(CircuitBreakerRegistry registry) {
+    public CircuitBreaker oneirosCircuitBreaker(CircuitBreakerRegistry registry, OneirosProperties properties) {
+        var cbConfig = properties.getCircuitBreaker();
         CircuitBreaker breaker = registry.circuitBreaker("oneiros-db-protection");
 
-        // HIER ist dein Custom Logging Design
+        if (!cbConfig.isEnabled()) {
+            log.info("🛡️ Circuit Breaker is DISABLED");
+            return breaker;
+        }
+
+        log.debug("🛡️ Circuit Breaker Configuration:");
+        log.debug("   📊 Failure rate threshold: {}%", cbConfig.getFailureRateThreshold());
+        log.debug("   ⏱️ Wait duration in open state: {}s", cbConfig.getWaitDurationInOpenState());
+        log.debug("   🔄 Permitted calls in half-open: {}", cbConfig.getPermittedCallsInHalfOpenState());
+        log.debug("   📏 Sliding window size: {}", cbConfig.getSlidingWindowSize());
+        log.debug("   🔢 Minimum number of calls: {}", cbConfig.getMinimumNumberOfCalls());
+
+        // Custom Logging Design für State-Änderungen
         breaker.getEventPublisher().onStateTransition(event -> {
             String from = event.getStateTransition().getFromState().toString();
             String to = event.getStateTransition().getToState().toString();
@@ -84,9 +101,40 @@ public class OneirosAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public io.oneiros.security.PasswordHasher passwordHasher() {
+        return new io.oneiros.security.PasswordHasher(io.oneiros.security.EncryptionType.ARGON2);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public io.oneiros.security.OneirosSecurityHandler securityHandler(
+            OneirosProperties properties,
+            CryptoService cryptoService,
+            io.oneiros.security.PasswordHasher passwordHasher) {
+        boolean securityEnabled = properties.getSecurity() != null && properties.getSecurity().isEnabled();
+        return new io.oneiros.security.OneirosSecurityHandler(cryptoService, passwordHasher, securityEnabled);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     @ConditionalOnProperty(name = "oneiros.pool.enabled", havingValue = "false", matchIfMissing = true)
-    public OneirosClient oneirosClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker breaker) {
-        OneirosWebsocketClient client = new OneirosWebsocketClient(properties, mapper, breaker);
+    public OneirosClient oneirosClient(
+            OneirosProperties properties,
+            ObjectMapper mapper,
+            CircuitBreaker breaker,
+            io.oneiros.security.OneirosSecurityHandler securityHandler) {
+
+        OneirosWebsocketClient rawClient = new OneirosWebsocketClient(properties, mapper, breaker);
+
+        // Wrap with security handler if encryption is enabled
+        OneirosClient client;
+        boolean securityEnabled = properties.getSecurity() != null && properties.getSecurity().isEnabled();
+        if (securityEnabled) {
+            log.info("🔐 Wrapping client with security handler (transparent encryption enabled)");
+            client = new io.oneiros.client.SecureOneirosClient(rawClient, securityHandler);
+        } else {
+            client = rawClient;
+        }
 
         // 🔥 AUTO-CONNECT: Establish connection immediately on startup
         if (properties.isAutoConnect()) {
@@ -111,7 +159,8 @@ public class OneirosAutoConfiguration {
     public OneirosClient oneirosConnectionPool(
             OneirosProperties properties,
             ObjectMapper mapper,
-            CircuitBreaker breaker) {
+            CircuitBreaker breaker,
+            io.oneiros.security.OneirosSecurityHandler securityHandler) {
 
         int poolSize = properties.getPool().getSize();
 
@@ -120,14 +169,24 @@ public class OneirosAutoConfiguration {
         log.info("   🔄 Auto-reconnect: {}", properties.getPool().isAutoReconnect());
         log.info("   ❤️ Health check interval: {}s", properties.getPool().getHealthCheckInterval());
 
-        OneirosConnectionPool pool = new OneirosConnectionPool(properties, mapper, breaker, poolSize);
+        OneirosConnectionPool rawPool = new OneirosConnectionPool(properties, mapper, breaker, poolSize);
+
+        // Wrap with security handler if encryption is enabled
+        OneirosClient pool;
+        boolean securityEnabled = properties.getSecurity() != null && properties.getSecurity().isEnabled();
+        if (securityEnabled) {
+            log.info("🔐 Wrapping connection pool with security handler (transparent encryption enabled)");
+            pool = new io.oneiros.client.SecureOneirosClient(rawPool, securityHandler);
+        } else {
+            pool = rawPool;
+        }
 
         // 🔥 NON-BLOCKING AUTO-CONNECT: Start connections in background
         // The WebSocket sessions must stay open, so we cannot block here
         pool.connect().subscribe(
                 null, // onNext
                 error -> log.error("❌ Connection pool initialization failed: {}", error.getMessage(), error),
-                () -> log.info("✅ Connection pool initialized with {} connections", pool.getStats().total())
+                () -> log.info("✅ Connection pool initialized")
         );
 
         return pool;
@@ -156,19 +215,34 @@ public class OneirosAutoConfiguration {
     /**
      * Migration Engine bean - auto-generates schema from @OneirosEntity classes.
      * Enabled by default, can be disabled with: oneiros.migration.enabled=false
+     *
+     * <p>Properties:
+     * <ul>
+     *   <li>oneiros.migration.enabled - Enable/disable migrations (default: true)</li>
+     *   <li>oneiros.migration.base-package - Package to scan (default: io.oneiros)</li>
+     *   <li>oneiros.migration.dry-run - Log SQL without executing (default: false)</li>
+     *   <li>oneiros.migration.overwrite - Use OVERWRITE instead of IF NOT EXISTS (default: false)</li>
+     * </ul>
      */
     @Bean
     @ConditionalOnProperty(name = "oneiros.migration.enabled", havingValue = "true", matchIfMissing = true)
     public OneirosMigrationEngine migrationEngine(
             OneirosClient client,
-            @Value("${oneiros.migration.base-package:io.oneiros}") String basePackage,
-            @Value("${oneiros.migration.dry-run:false}") boolean dryRun) {
+            OneirosProperties properties) {
+
+        OneirosProperties.Migration migrationProps = properties.getMigration();
+        String basePackage = migrationProps.getBasePackage();
+        boolean dryRun = migrationProps.isDryRun();
+        boolean overwrite = migrationProps.isOverwrite();
 
         log.info("🔧 Initializing Oneiros Migration Engine");
         log.info("   📦 Base package: {}", basePackage);
         log.info("   🧪 Dry run: {}", dryRun);
+        if (overwrite) {
+            log.info("   🔄 Overwrite mode: ENABLED (will update existing schema definitions)");
+        }
 
-        OneirosMigrationEngine engine = new OneirosMigrationEngine(client, basePackage, true, dryRun);
+        OneirosMigrationEngine engine = new OneirosMigrationEngine(client, basePackage, true, dryRun, overwrite);
 
         // Wait for pool to be ready before running migrations
         Mono<Void> waitForReady = client instanceof io.oneiros.pool.OneirosConnectionPool

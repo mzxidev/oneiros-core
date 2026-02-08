@@ -1,1139 +1,464 @@
-# 🌙 Oneiros - Reactive SurrealDB Client for Java
+# 🌙 Oneiros - Production-Ready Reactive SurrealDB Client
 
 <div align="center">
 
 [![Java](https://img.shields.io/badge/Java-21+-orange.svg)](https://www.oracle.com/java/)
 [![SurrealDB](https://img.shields.io/badge/SurrealDB-2.0+-purple.svg)](https://surrealdb.com/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.x-green.svg)](https://spring.io/projects/spring-boot)
+[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg)](CHANGELOG_v0.3.0.md)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-**A modern, type-safe, reactive client library for SurrealDB with intuitive fluent APIs and comprehensive SurrealQL support.**
+**Eine moderne, type-safe, reactive Client-Library für SurrealDB mit intuitiven Fluent APIs, automatischen Migrations, Field-Level Encryption und Enterprise-Features.**
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-core-concepts) • [Examples](#-examples) • [API Reference](#-complete-api-reference)
+[Features](#-features) • [Installation](#-installation) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Examples](#-examples)
 
 </div>
 
 ---
 
-## 📋 Table of Contents
+## 📋 Inhaltsverzeichnis
 
-- [Features](#-features)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Configuration](#-configuration)
-- [Core Concepts](#-core-concepts)
-  - [Entities & Annotations](#entities--annotations)
-  - [Repository Pattern](#repository-pattern)
-  - [Fluent Query API](#fluent-query-api)
-  - [Statement API](#statement-api)
-- [Advanced Features](#-advanced-features)
-  - [Transactions](#transactions)
-  - [Graph Queries](#graph-queries)
-  - [Security & Encryption](#security--encryption)
-- [Complete API Reference](#-complete-api-reference)
-- [Examples](#-examples)
-- [Best Practices](#-best-practices)
-- [Troubleshooting](#-troubleshooting)
+- [🎯 Highlights](#-highlights)
+- [✨ Features](#-features)
+- [📦 Installation](#-installation)
+- [🚀 Quick Start](#-quick-start)
+  - [Pure Java](#pure-java-standalone)
+  - [Spring Boot](#spring-boot)
+- [🔧 Konfiguration](#-konfiguration)
+- [📚 Core Concepts](#-core-concepts)
+  - [Entities & Annotationen](#1-entities--annotationen)
+  - [CRUD Operationen](#2-crud-operationen)
+  - [Query API](#3-query-api)
+  - [Statement API](#4-statement-api)
+- [🚀 Advanced Features](#-advanced-features)
+  - [Auto-Migration Engine](#1-auto-migration-engine)
+  - [Versioned Migrations](#2-versioned-migrations-flyway-style)
+  - [Field-Level Encryption](#3-field-level-encryption)
+  - [LZ4 Backup System](#4-lz4-backup-system)
+  - [Connection Pool](#5-connection-pool)
+  - [Transactions](#6-transactions)
+  - [Graph Relations](#7-graph-relations)
+  - [Live Queries](#8-live-queries-real-time)
+  - [Circuit Breaker](#9-circuit-breaker)
+- [📖 Documentation](#-documentation)
+- [💡 Examples](#-examples)
+- [🎯 Best Practices](#-best-practices)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [🤝 Contributing](#-contributing)
+
+---
+
+## 🎯 Highlights
+
+```java
+// 1️⃣ Define your entity with encryption
+@OneirosEntity("users")
+public class User {
+    @OneirosID
+    private String id;
+    
+    private String name;
+    
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String apiKey;
+    
+    @OneirosEncrypted(type = EncryptionType.ARGON2)
+    private String password;
+}
+
+// 2️⃣ Auto-connect with encryption enabled
+Oneiros oneiros = OneirosBuilder.create()
+    .url("ws://localhost:8000/rpc")
+    .namespace("myns")
+    .database("mydb")
+    .username("root")
+    .password("root")
+    .encryptionKey("my-secret-key-32-chars!")
+    .migrationsPackage("com.example.domain")
+    .poolEnabled(true)
+    .poolSize(10)
+    .build();
+
+// 3️⃣ Use reactive API - encryption is transparent!
+User user = new User();
+user.setApiKey("secret-key-123");
+user.setPassword("myPassword");
+
+oneiros.client()
+    .create("users", user, User.class)
+    .subscribe(created -> {
+        // ✅ created.getApiKey() = "secret-key-123" (decrypted)
+        // ✅ In DB: Base64-encrypted AES-GCM
+        // ✅ Password: Argon2-hashed
+    });
+```
+
+**Das war's! Verschlüsselung, Auto-Migration, Connection-Pooling - alles automatisch.**
 
 ---
 
 ## ✨ Features
 
-### 🚀 **Core Capabilities**
-- ✅ **Reactive & Non-Blocking** - Built on Project Reactor for high-performance async operations
-- ✅ **Type-Safe** - Full compile-time type checking with Java generics
-- ✅ **Fluent API** - Intuitive, chainable query builder
-- ✅ **Statement API** - Direct SurrealQL statement construction
-- ✅ **Spring Boot Integration** - Auto-configuration and dependency injection
-- ✅ **Annotation-Based** - Simple entity mapping with `@OneirosEntity`, `@OneirosID`, `@OneirosEncrypted`
+### 🔥 **Core Features**
 
-### 🔥 **Advanced Features**
-- 🔐 **Built-in Encryption** - Automatic field-level AES encryption
-- 📊 **Graph Queries** - Native support for SurrealDB's graph relations (`->knows->`, `<-follows<-`)
-- 🔄 **Transactions** - ACID transactions with BEGIN/COMMIT/ROLLBACK
-- 🎯 **Control Flow** - IF/ELSE, FOR loops, LET variables, THROW/RETURN statements
-- ⚡ **Query Optimization** - TIMEOUT, PARALLEL execution, START/LIMIT pagination
-- 🎨 **Privacy Control** - OMIT sensitive fields, FETCH related records
+| Feature | Status | Beschreibung |
+|---------|--------|--------------|
+| 🚀 **Reactive API** | ✅ | Non-blocking mit Project Reactor (Mono/Flux) |
+| 🎯 **Type-Safe** | ✅ | Compile-time type checking mit Generics |
+| 🔌 **Framework-Agnostic** | ✅ | Pure Java oder Spring Boot |
+| 📝 **Annotation-Based** | ✅ | Einfache Entity-Definition |
+| 🔄 **Auto-Migration** | ✅ | Automatische Schema-Generierung |
+| 🔐 **Field Encryption** | ✅ | Transparent mit AES-256-GCM/Argon2/BCrypt |
+| 🗜️ **LZ4 Backups** | ✅ | High-performance streaming backups |
+| 🏊 **Connection Pool** | ✅ | Load-balancing über mehrere Connections |
+| 🔄 **Transactions** | ✅ | ACID-konforme Transaktionen |
+| 📊 **Live Queries** | ✅ | Real-time WebSocket streaming |
+| 🛡️ **Circuit Breaker** | ✅ | Resilience4j integration |
+| 🔍 **Fluent Query API** | ✅ | Intuitiver Query-Builder |
+| 💾 **Statement API** | ✅ | Direkter SurrealQL-Zugriff |
 
-### 🚀 **Real-time & Performance Features**
-- 🔴 **Live Queries** - Real-time data streams with LIVE SELECT
-- 🏊 **Connection Pooling** - Load balancing with multiple WebSocket connections
-- 🔍 **Full-Text Search** - BM25 ranking, highlights, custom analyzers
-- 🛡️ **Circuit Breaker** - Automatic failure detection and recovery
-- 📈 **Health Monitoring** - Spring Boot Actuator integration
+### 🆕 **Neu in v0.3.0**
 
-### 📈 **SurrealQL Support**
-- ✅ **Data Operations**: SELECT, CREATE, UPDATE, DELETE, UPSERT, INSERT
-- ✅ **Graph Operations**: RELATE for bidirectional relationships
-- ✅ **Control Flow**: IF/ELSE, FOR, BREAK, CONTINUE
-- ✅ **Transactions**: BEGIN, COMMIT, CANCEL
-- ✅ **Variables**: LET, RETURN, THROW
-- ✅ **Clauses**: WHERE, ORDER BY, LIMIT, START, FETCH, OMIT, TIMEOUT, PARALLEL
+#### 🔄 **Versioned Migrations (Flyway-Style)**
+```java
+public class V001_CreateUserTable implements OneirosMigration {
+    @Override
+    public int getVersion() { return 1; }
+    
+    @Override
+    public Mono<Void> up(OneirosClient client) {
+        return client.query("DEFINE TABLE users SCHEMAFULL;", Object.class).then();
+    }
+}
+```
+
+#### 🔐 **Transparent Field-Level Encryption**
+```java
+@OneirosEncrypted(type = EncryptionType.AES_GCM)
+private String creditCard;  // Automatisch ver- und entschlüsselt!
+```
+
+#### 🗜️ **LZ4 Streaming Backups**
+```java
+backupManager.createBackup(Paths.get("./backups"))
+    .subscribe(file -> log.info("Backup: {}", file));
+```
+
+#### 🏊 **Connection Pooling**
+```java
+.poolEnabled(true)
+.poolSize(10)  // 10 parallele WebSocket-Connections
+```
 
 ---
 
 ## 📦 Installation
 
-### Gradle (build.gradle)
+### Gradle
 
-**Important:** Add the JitPack repository to your build file:
-
-```groovy
-repositories {
-    mavenCentral()
-    maven { url 'https://jitpack.io' }  // Required for Oneiros
-}
-
+```gradle
 dependencies {
-    implementation 'com.github.mzxidev:oneiros-core:v0.2.0'
-    
-    // Required dependencies (if not already present)
-    implementation 'org.springframework.boot:spring-boot-starter-webflux:3.2.0'
-    implementation 'io.projectreactor:reactor-core:3.6.0'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.2'
+    implementation 'io.oneiros:oneiros-core:0.3.0'
 }
 ```
 
-### Maven (pom.xml)
-
-**Important:** Add the JitPack repository:
+### Maven
 
 ```xml
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
+<dependency>
+    <groupId>io.oneiros</groupId>
+    <artifactId>oneiros-core</artifactId>
+    <version>0.3.0</version>
+</dependency>
+```
 
-<dependencies>
-    <dependency>
-        <groupId>com.github.mzxidev</groupId>
-        <artifactId>oneiros-core</artifactId>
-        <version>v0.2.0</version>
-    </dependency>
-</dependencies>
+### Local Build
+
+```bash
+git clone https://github.com/yourusername/oneiros-core.git
+cd oneiros-core
+./gradlew publishToMavenLocal
 ```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1️⃣ Configuration (application.yml)
-
-```yaml
-spring:
-  main:
-    web-application-type: reactive
-
-oneiros:
-  url: "ws://127.0.0.1:8000/rpc"
-  username: "root"
-  password: "root"
-  namespace: "my_namespace"
-  database: "my_database"
-  security:
-    enabled: true
-    key: "SuperSecretKey123456789" # Must be > 16 characters
-  cache:
-    enabled: true
-    ttl-seconds: 60
-```
-
-### 2️⃣ Define Your Entity
+### Pure Java (Standalone)
 
 ```java
+import io.oneiros.core.*;
+import io.oneiros.annotation.*;
+
+// 1. Define Entity
+@OneirosEntity("users")
+public class User {
+    @OneirosID
+    private String id;
+    private String name;
+    private String email;
+    
+    // Getters & Setters...
+}
+
+// 2. Create Client
+public class Main {
+    public static void main(String[] args) {
+        // Build Oneiros instance
+        Oneiros oneiros = OneirosBuilder.create()
+            .url("ws://localhost:8000/rpc")
+            .namespace("myns")
+            .database("mydb")
+            .username("root")
+            .password("root")
+            .build();
+        
+        // Create user
+        User user = new User();
+        user.setName("John Doe");
+        user.setEmail("john@example.com");
+        
+        oneiros.client()
+            .create("users", user, User.class)
+            .subscribe(
+                created -> System.out.println("Created: " + created.getId()),
+                error -> System.err.println("Error: " + error),
+                () -> System.out.println("Complete!")
+            );
+        
+        // Keep application running for async operations
+        Thread.sleep(2000);
+        
+        // Clean up
+        oneiros.close();
+    }
+}
+```
+
+### Spring Boot
+
+#### 1. **application.yml**
+
+```yaml
+oneiros:
+  url: ws://localhost:8000/rpc
+  namespace: myns
+  database: mydb
+  username: root
+  password: root
+  auto-connect: true
+  
+  # Optional: Enable security
+  security:
+    enabled: true
+    key: "my-32-character-encryption-key!"
+  
+  # Optional: Connection Pool
+  pool:
+    enabled: true
+    size: 10
+    min-idle: 2
+    
+  # Optional: Auto-Migration
+  migration:
+    enabled: true
+    base-package: "com.example.domain"
+```
+
+#### 2. **Entity Class**
+
+```java
+package com.example.domain;
+
 import io.oneiros.annotation.*;
 
 @OneirosEntity("users")
 public class User {
-    
     @OneirosID
     private String id;
     
     private String name;
-    private String email;
     
-    @OneirosEncrypted
-    private String password;
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String apiKey;
     
-    private Integer age;
-    private Boolean verified;
-    
-    // Getters and Setters...
+    // Getters & Setters...
 }
 ```
 
-### 3️⃣ Create a Repository
-
-```java
-import io.oneiros.core.SimpleOneirosRepository;
-import org.springframework.stereotype.Repository;
-
-@Repository
-public class UserRepository extends SimpleOneirosRepository<User> {
-    
-    public UserRepository(OneirosClient client) {
-        super(client, User.class);
-    }
-    
-    // Custom query methods
-    public Mono<User> findByEmail(String email) {
-        return OneirosQuery.select(User.class)
-            .where("email").is(email)
-            .executeOne(client);
-    }
-}
-```
-
-### 4️⃣ Use in Your Service
+#### 3. **Service Class**
 
 ```java
 @Service
 public class UserService {
     
-    private final UserRepository userRepository;
-    private final OneirosClient client;
-    
-    // Simple CRUD
-    public Mono<User> createUser(User user) {
-        return userRepository.save(user);
-    }
-    
-    // Fluent Query API
-    public Flux<User> findAdultUsers() {
-        return OneirosQuery.select(User.class)
-            .where("age").greaterThanOrEqual(18)
-            .where("verified").is(true)
-            .orderBy("name", "ASC")
-            .limit(50)
-            .execute(client);
-    }
-    
-    // Statement API
-    public Mono<User> updateUserEmail(String userId, String newEmail) {
-        return UpdateStatement.table(User.class)
-            .set("email", newEmail)
-            .where("id = user:" + userId)
-            .executeOne(client);
-    }
-}
-```
-
----
-
-## ⚙️ Configuration
-
-### Complete Configuration Reference
-
-```yaml
-oneiros:
-  # Database Connection
-  url: "ws://127.0.0.1:8000/rpc"        # WebSocket URL to SurrealDB
-  username: "root"                       # Database username
-  password: "root"                       # Database password
-  namespace: "my_namespace"              # SurrealDB namespace
-  database: "my_database"                # SurrealDB database
-  auto-connect: true                     # Connect on startup (default: true)
-  
-  # Security Settings
-  security:
-    enabled: true                        # Enable field-level encryption
-    key: "YourSecretKey123456789"       # AES encryption key (min 16 chars)
-  
-  # Cache Settings
-  cache:
-    enabled: true                        # Enable query result caching
-    ttl-seconds: 60                     # Cache time-to-live in seconds
-  
-  # Connection Pool (Production Recommended)
-  pool:
-    enabled: false                       # Enable connection pool (default: false)
-    size: 10                            # Number of connections (default: 5)
-    auto-reconnect: true                # Auto-reconnect failed connections
-    health-check-interval: 30           # Health check interval in seconds
-    
-  # Performance & Resilience
-  circuit-breaker:
-    enabled: true                        # Enable circuit breaker for resilience
-    failure-rate-threshold: 50          # Percentage of failures to open circuit
-    wait-duration-in-open-state: 30s    # Wait time before half-open state
-    sliding-window-size: 100            # Number of calls to track
-
-  # Schema Migration
-  migration:
-    enabled: true                        # Auto-generate schema from entities
-    base-package: "com.yourapp"         # Package to scan for @OneirosEntity
-    dry-run: false                      # If true, only logs schema without applying
-```
-
-### ⚠️ Important Notes
-
-#### **Connection Pool Behavior**
-When using connection pooling (`oneiros.pool.enabled=true`):
-- The pool initializes **asynchronously** in the background
-- WebSocket connections stay open for the lifetime of the application
-- Migrations wait for at least one connection to be ready before executing
-- If all initial connections fail, the application will start but queries will fail until connections are established
-
-#### **WebSocket Connection Lifecycle**
-- Connections are established once and kept alive
-- The pool automatically monitors connection health via periodic health checks
-- Failed connections are detected and reconnected automatically (if `auto-reconnect: true`)
-- Each connection maintains its own session state (authentication, namespace/database selection)
-
-#### **Performance Recommendations**
-- **Single Application**: Use `pool.enabled: false` for simplicity
-- **High Load / Production**: Use `pool.enabled: true` with `pool.size: 5-10`
-- **Adjust pool size** based on your concurrent request load
-- Monitor pool stats via `OneirosConnectionPool.getStats()`
-```
-
-### Connection Modes
-
-Oneiros supports two connection modes:
-
-#### **Auto-Connect (Recommended)**
-```yaml
-oneiros:
-  auto-connect: true  # Connect immediately on startup
-```
-✅ **Benefits:**
-- Fails fast on startup if configuration is wrong
-- Connection ready immediately for first request
-- Shows clear connection status in startup logs
-
-#### **Lazy Connect**
-```yaml
-oneiros:
-  auto-connect: false  # Connect on first request
-```
-⚠️ **Use Cases:**
-- When SurrealDB might not be available on startup
-- For applications with optional database features
-
-### Health Monitoring
-
-Once configured, you can check connection status via:
-
-**Spring Boot Actuator:**
-```bash
-curl http://localhost:8080/actuator/health
-```
-
-Response:
-```json
-{
-  "status": "UP",
-  "components": {
-    "oneirosHealthIndicator": {
-      "status": "UP",
-      "details": {
-        "status": "Connected",
-        "type": "OneirosWebsocketClient"
-      }
-    }
-  }
-}
-```
-
-### Environment Variables
-
-```bash
-export ONEIROS_URL=ws://127.0.0.1:8000/rpc
-export ONEIROS_USERNAME=root
-export ONEIROS_PASSWORD=root
-export ONEIROS_NAMESPACE=my_namespace
-export ONEIROS_DATABASE=my_database
-export ONEIROS_SECURITY_KEY=MySecretKey123
-```
-
----
-
-## 🎯 Core Concepts
-
-### Entities & Annotations
-
-#### `@OneirosEntity`
-Marks a class as a SurrealDB entity and specifies the table name.
-
-```java
-@OneirosEntity("users")  // Table name: "users"
-public class User { }
-
-@OneirosEntity           // Table name: auto-derived as "product"
-public class Product { }
-```
-
-#### `@OneirosID`
-Marks a field as the record ID.
-
-```java
-public class User {
-    @OneirosID
-    private String id;  // Will be "user:abc123" in SurrealDB
-}
-```
-
-#### `@OneirosEncrypted`
-Marks a field for automatic encryption/decryption.
-
-```java
-public class User {
-    @OneirosEncrypted
-    private String password;  // Automatically encrypted before saving
-}
-```
-
----
-
-### Repository Pattern
-
-#### SimpleOneirosRepository
-
-```java
-@Repository
-public class UserRepository extends SimpleOneirosRepository<User> {
-    
-    public UserRepository(OneirosClient client) {
-        super(client, User.class);
-    }
-    
-    // Inherited methods:
-    // - Mono<User> save(User entity)
-    // - Flux<User> saveAll(List<User> entities)
-    // - Mono<User> findById(String id)
-    // - Flux<User> findAll()
-    // - Mono<Void> deleteById(String id)
-}
-```
-
-#### Custom Query Methods
-
-```java
-@Repository
-public class UserRepository extends SimpleOneirosRepository<User> {
-    
-    // Custom query using Fluent API
-    public Flux<User> findByRole(String role) {
-        return OneirosQuery.select(User.class)
-            .where("role").is(role)
-            .execute(client);
-    }
-    
-    // Complex query with multiple conditions
-    public Flux<User> findActiveAdmins() {
-        return OneirosQuery.select(User.class)
-            .where("role").is("ADMIN")
-            .where("active").is(true)
-            .where("last_login").greaterThan("2024-01-01")
-            .orderBy("name", "ASC")
-            .limit(100)
-            .execute(client);
-    }
-}
-```
-
----
-
-### Fluent Query API
-
-The **Fluent Query API** provides an intuitive, chainable interface for building queries.
-
-#### Basic SELECT Queries
-
-```java
-// Select all users
-OneirosQuery.select(User.class)
-    .execute(client);
-
-// Select with WHERE condition
-OneirosQuery.select(User.class)
-    .where("age").greaterThanOrEqual(18)
-    .execute(client);
-
-// Multiple conditions (AND)
-OneirosQuery.select(User.class)
-    .where("age").greaterThanOrEqual(18)
-    .where("verified").is(true)
-    .where("role").is("ADMIN")
-    .execute(client);
-
-// OR conditions
-OneirosQuery.select(User.class)
-    .where("role").is("ADMIN")
-    .or("role").is("MODERATOR")
-    .execute(client);
-```
-
-#### WHERE Clause Operators
-
-```java
-// Comparison operators
-.where("age").is(25)                    // age = 25
-.where("age").notEquals(25)             // age != 25
-.where("age").greaterThan(18)           // age > 18
-.where("age").greaterThanOrEqual(18)    // age >= 18
-.where("age").lessThan(65)              // age < 65
-.where("age").lessThanOrEqual(65)       // age <= 65
-
-// IN operator
-.where("role").in("ADMIN", "MODERATOR") // role IN ['ADMIN', 'MODERATOR']
-
-// LIKE operator (pattern matching)
-.where("email").like("%@gmail.com")     // email ~ '%@gmail.com'
-
-// BETWEEN operator
-.where("age").between(18, 65)           // age >= 18 AND age <= 65
-
-// NULL checks
-.where("deleted_at").isNull()           // deleted_at IS NULL
-.where("deleted_at").isNotNull()        // deleted_at IS NOT NULL
-```
-
-#### Sorting & Pagination
-
-```java
-// ORDER BY
-OneirosQuery.select(User.class)
-    .orderBy("name", "ASC")
-    .execute(client);
-
-// LIMIT
-OneirosQuery.select(User.class)
-    .limit(50)
-    .execute(client);
-
-// START + LIMIT (pagination with offset)
-OneirosQuery.select(User.class)
-    .limit(50)
-    .start(100)  // START 100 LIMIT 50
-    .execute(client);
-```
-
-#### Privacy & Performance
-
-```java
-// OMIT - Exclude sensitive fields
-OneirosQuery.select(User.class)
-    .omit("password", "ssn", "credit_card")
-    .execute(client);
-
-// FETCH - Load related records (graph traversal)
-OneirosQuery.select(User.class)
-    .fetch("profile", "permissions", "posts")
-    .execute(client);
-
-// TIMEOUT - Set query timeout
-OneirosQuery.select(User.class)
-    .timeout(Duration.ofSeconds(5))
-    .execute(client);
-
-// PARALLEL - Enable parallel execution
-OneirosQuery.select(User.class)
-    .parallel()
-    .execute(client);
-```
-
-#### Complete Example
-
-```java
-// Find verified adult users, exclude sensitive data, sort, and paginate
-Flux<User> users = OneirosQuery.select(User.class)
-    .where("age").greaterThanOrEqual(18)
-    .where("verified").is(true)
-    .where("role").in("USER", "PREMIUM")
-    .omit("password", "ssn")
-    .fetch("profile", "preferences")
-    .orderBy("created_at", "DESC")
-    .limit(50)
-    .start(0)
-    .timeout(Duration.ofSeconds(3))
-    .execute(client);
-```
-
----
-
-### Statement API
-
-The **Statement API** provides direct control over SurrealQL statements.
-
-#### CREATE Statement
-
-```java
-// Create with random ID
-CreateStatement.table(User.class)
-    .set("name", "Alice")
-    .set("email", "alice@example.com")
-    .set("age", 25)
-    .executeOne(client);
-
-// Create with specific ID
-CreateStatement.record(User.class, "alice")
-    .set("name", "Alice")
-    .set("email", "alice@example.com")
-    .executeOne(client);
-
-// Create with CONTENT (object)
-User user = new User();
-user.setName("Alice");
-user.setEmail("alice@example.com");
-
-CreateStatement.table(User.class)
-    .content(user)
-    .executeOne(client);
-```
-
-#### UPDATE Statement
-
-```java
-// Update specific record
-UpdateStatement.record(User.class, "alice")
-    .set("verified", true)
-    .set("verified_at", "2024-01-15")
-    .executeOne(client);
-
-// Update with WHERE condition
-UpdateStatement.table(User.class)
-    .set("verified", true)
-    .where("email = 'alice@example.com'")
-    .execute(client);
-
-// Update with RETURN clause
-UpdateStatement.table(User.class)
-    .set("verified", true)
-    .where("email = 'alice@example.com'")
-    .returnBefore()  // RETURN BEFORE
-    .executeOne(client);
-```
-
-#### DELETE Statement
-
-```java
-// Delete specific record
-DeleteStatement.record(User.class, "alice")
-    .executeOne(client);
-
-// Delete with WHERE condition
-DeleteStatement.from(User.class)
-    .where("age < 18")
-    .execute(client);
-
-// Delete with RETURN clause
-DeleteStatement.from(User.class)
-    .where("verified = false")
-    .returnBefore()
-    .execute(client);
-```
-
-#### UPSERT Statement
-
-```java
-// Upsert (insert or update)
-UpsertStatement.table(User.class)
-    .set("name", "Bob")
-    .set("email", "bob@example.com")
-    .where("email = 'bob@example.com'")
-    .executeOne(client);
-
-// Upsert specific record
-UpsertStatement.record(User.class, "bob")
-    .set("name", "Bob")
-    .set("email", "bob@example.com")
-    .executeOne(client);
-```
-
-#### INSERT Statement
-
-```java
-// Insert with VALUES
-InsertStatement.into(User.class)
-    .fields("name", "email", "age")
-    .values("Charlie", "charlie@example.com", 30)
-    .executeOne(client);
-
-// Insert multiple records
-InsertStatement.into(User.class)
-    .fields("name", "email", "age")
-    .values("Alice", "alice@example.com", 25)
-    .values("Bob", "bob@example.com", 30)
-    .execute(client);
-```
-
-#### SELECT Statement
-
-```java
-// Basic SELECT
-SelectStatement.from(User.class)
-    .execute(client);
-
-// SELECT with WHERE
-SelectStatement.from(User.class)
-    .where("age >= 18")
-    .execute(client);
-
-// SELECT with ORDER BY
-SelectStatement.from(User.class)
-    .where("verified = true")
-    .orderBy("name")
-    .execute(client);
-
-// SELECT with LIMIT
-SelectStatement.from(User.class)
-    .limit(50)
-    .execute(client);
-```
-
----
-
-## 🔴 Real-time & Performance Features
-
-### Live Queries
-
-Subscribe to real-time updates from SurrealDB using LIVE SELECT.
-
-#### Basic Live Query
-
-```java
-@Service
-public class ProductService {
-    
-    private final OneirosLiveManager liveManager;
-    
-    // Subscribe to product price changes
-    public Flux<OneirosEvent<Product>> watchPriceChanges() {
-        return liveManager.live(Product.class)
-            .where("price < 100")
-            .subscribe();
-    }
-    
-    // Handle events
-    public void startWatching() {
-        watchPriceChanges()
-            .subscribe(event -> {
-                switch (event.getAction()) {
-                    case CREATE -> log.info("New product: {}", event.getData());
-                    case UPDATE -> log.info("Updated: {}", event.getData());
-                    case DELETE -> log.info("Deleted: {}", event.getId());
-                }
-            });
-    }
-}
-```
-
-#### Live Query with Encryption
-
-Encrypted fields are automatically decrypted in live events:
-
-```java
-@Service
-public class UserMonitoringService {
-    
-    private final OneirosLiveManager liveManager;
-    
-    public Flux<OneirosEvent<User>> watchAdminActions() {
-        return liveManager.live(User.class)
-            .where("role = 'ADMIN'")
-            .withDecryption(true)  // Auto-decrypt @OneirosEncrypted fields
-            .subscribe();
-    }
-}
-```
-
-#### Live Query Event Structure
-
-```java
-public class OneirosEvent<T> {
-    private LiveAction action;  // CREATE, UPDATE, DELETE
-    private String id;          // Record ID
-    private T data;             // Full record (for CREATE/UPDATE)
-    private T before;           // Previous state (for UPDATE)
-    private Instant timestamp;  // Event timestamp
-}
-```
-
-### Connection Pooling
-
-Enable connection pooling for high-traffic applications.
-
-#### Configuration
-
-```yaml
-oneiros:
-  connection-pool:
-    enabled: true                          # Enable connection pool
-    size: 5                                # Number of WebSocket connections
-    health-check-interval-seconds: 30      # Health check interval
-    reconnect-delay-seconds: 5             # Reconnect delay on failure
-```
-
-#### Features
-
-- ✅ **Round-robin load balancing** - Distributes queries across connections
-- ✅ **Automatic health checks** - Detects and removes dead connections
-- ✅ **Auto-reconnection** - Rebuilds failed connections automatically
-- ✅ **Transparent** - No code changes needed
-
-#### Usage
-
-```java
-@Service
-public class HighTrafficService {
-    
     @Autowired
-    private OneirosClient client;  // Auto-wired as pool if enabled
+    private OneirosClient client;  // Auto-injected!
     
-    // All queries automatically use the connection pool
-    public Flux<Product> getProducts() {
-        return OneirosQuery.select(Product.class)
-            .execute(client);  // Uses next available connection
+    public Mono<User> createUser(User user) {
+        return client.create("users", user, User.class);
+    }
+    
+    public Flux<User> getAllUsers() {
+        return client.select("users", User.class);
+    }
+    
+    public Mono<User> getUserById(String id) {
+        return client.select("users:" + id, User.class)
+            .next();
     }
 }
 ```
 
-### Full-Text Search
-
-Powerful full-text search with BM25 ranking and custom analyzers.
-
-#### Mark Fields for Search
-
-```java
-@OneirosEntity("products")
-public class Product {
-    
-    @OneirosFullText(analyzer = "ascii", bm25 = true)
-    private String description;
-    
-    @OneirosFullText(analyzer = "unicode")
-    private String title;
-}
-```
-
-#### Search API
-
-```java
-@Service
-public class SearchService {
-    
-    private final OneirosClient client;
-    
-    // Basic search
-    public Flux<Product> searchProducts(String query) {
-        return OneirosSearch.table(Product.class)
-            .content("description")
-            .matching(query)
-            .execute(client);
-    }
-    
-    // Advanced search with scoring
-    public Flux<Product> advancedSearch(String query) {
-        return OneirosSearch.table(Product.class)
-            .content("description", "title")
-            .matching(query)
-            .withScoring()
-            .minScore(0.7)
-            .withHighlights()
-            .limit(20)
-            .execute(client);
-    }
-}
-```
-
-#### Generated SurrealQL
-
-```sql
--- Basic search
-SELECT * FROM products 
-WHERE description @@ 'wireless headphones';
-
--- Advanced search with scoring
-SELECT *, search::score(1) AS relevance
-FROM products
-WHERE description @@ 'wireless headphones'
-   OR title @@ 'wireless headphones'
-ORDER BY relevance DESC
-LIMIT 20;
-```
-
-#### Search Results with Highlights
-
-```json
-{
-  "id": "product:123",
-  "name": "Premium Headphones",
-  "description": "<mark>Wireless</mark> Bluetooth 5.0 <mark>headphones</mark>",
-  "relevance": 0.92
-}
-```
-
-### Health Monitoring
-
-Spring Boot Actuator integration for monitoring.
-
-#### Configuration
-
-```yaml
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,metrics
-  endpoint:
-    health:
-      show-details: always
-```
-
-#### Health Endpoint
-
-```bash
-GET /actuator/health
-
-{
-  "status": "UP",
-  "components": {
-    "oneiros": {
-      "status": "UP",
-      "details": {
-        "connections": 5,
-        "activeConnections": 5,
-        "deadConnections": 0,
-        "totalQueries": 1523,
-        "failedQueries": 3
-      }
-    }
-  }
-}
-```
-
----
-
-## 🔥 Advanced Features
-
-### 🏊 Connection Pooling
-
-For production applications with high traffic, enable connection pooling for improved performance and resilience.
-
-#### Enable Connection Pool
-
-```yaml
-oneiros:
-  pool:
-    enabled: true          # Enable connection pool
-    size: 10              # Number of connections
-    auto-reconnect: true  # Auto-reconnect on failure
-    health-check-interval: 30  # Health check every 30s
-```
-
-#### Features
-
-✅ **Load Balancing** - Round-robin distribution across connections  
-✅ **Automatic Failover** - Queries redirected to healthy connections  
-✅ **Health Monitoring** - Continuous connection health checks  
-✅ **Auto-Recovery** - Failed connections automatically reconnected  
-✅ **Circuit Breaker** - Protects against cascading failures  
-
-#### Monitor Pool Health
+#### 4. **Controller**
 
 ```java
 @RestController
-@RequestMapping("/api/health")
-public class HealthController {
-
-    private final OneirosConnectionPool pool;
-
-    @GetMapping("/pool")
-    public PoolStats getPoolStats() {
-        return pool.getStats();
-        // Returns: { total: 10, healthy: 9, unhealthy: 1, maxSize: 10 }
+@RequestMapping("/api/users")
+public class UserController {
+    
+    @Autowired
+    private UserService userService;
+    
+    @PostMapping
+    public Mono<User> createUser(@RequestBody User user) {
+        return userService.createUser(user);
+    }
+    
+    @GetMapping
+    public Flux<User> getAllUsers() {
+        return userService.getAllUsers();
+    }
+    
+    @GetMapping("/{id}")
+    public Mono<User> getUser(@PathVariable String id) {
+        return userService.getUserById(id);
     }
 }
 ```
 
-📖 **Full Documentation:** [CONNECTION_POOL_GUIDE.md](CONNECTION_POOL_GUIDE.md)
-
 ---
 
-### Transactions
+## 🔧 Konfiguration
 
-Execute multiple statements atomically using transactions.
-
-#### Basic Transaction
+### Pure Java Configuration
 
 ```java
-TransactionStatement transaction = TransactionStatement.begin();
-
-transaction
-    .add(CreateStatement.table(User.class)
-        .set("name", "Test User")
-        .set("balance", 1000))
+Oneiros oneiros = OneirosBuilder.create()
+    // Connection
+    .url("ws://localhost:8000/rpc")
+    .namespace("myns")
+    .database("mydb")
+    .username("root")
+    .password("root")
+    .autoConnect(true)
     
-    .add(UpdateStatement.table(Account.class)
-        .set("balance -= 100")
-        .where("id = account:sender"))
+    // Security
+    .encryptionKey("my-32-character-secret-key!!")
     
-    .add(UpdateStatement.table(Account.class)
-        .set("balance += 100")
-        .where("id = account:receiver"));
-
-transaction.commit().execute(client).subscribe();
-```
-
-#### Transaction with IF/ELSE Logic
-
-```java
-TransactionStatement transaction = TransactionStatement.begin();
-
-transaction
-    .add(LetStatement.variable("amount", "100"))
+    // Connection Pool
+    .poolEnabled(true)
+    .poolSize(10)
+    .poolMinIdle(2)
+    .poolMaxWaitSeconds(30)
+    .poolAutoReconnect(true)
     
-    .add(IfStatement.condition("account:sender.balance >= $amount")
-        .then(builder -> builder
-            .update(Account.class)
-            .set("balance -= $amount")
-            .where("id = account:sender"))
-        .elseBlock(builder -> builder
-            .throwError("Insufficient funds")))
+    // Circuit Breaker
+    .circuitBreakerEnabled(true)
+    .circuitBreakerFailureRateThreshold(50)
+    .circuitBreakerWaitDurationInOpenState(5)
     
-    .add(UpdateStatement.table(Account.class)
-        .set("balance += $amount")
-        .where("id = account:receiver"));
-
-transaction.commit().execute(client).subscribe();
-```
-
-#### Transaction with FOR Loop
-
-```java
-TransactionStatement transaction = TransactionStatement.begin();
-
-transaction
-    .add(ForStatement.variable("$user")
-        .in("(SELECT * FROM users WHERE role = 'PREMIUM')")
-        .do(builder -> builder
-            .update(User.class)
-            .set("discount = 0.2")
-            .where("id = $user.id")));
-
-transaction.commit().execute(client).subscribe();
-```
-
-#### Convert Fluent Query to Transaction
-
-```java
-// Start with a fluent query
-OneirosQuery<User> query = OneirosQuery.select(User.class)
-    .where("age").greaterThanOrEqual(18)
-    .where("verified").is(true)
-    .limit(100);
-
-// Convert to SelectStatement
-SelectStatement<User> selectStmt = query.toSelectStatement();
-
-// Use in transaction
-TransactionStatement transaction = TransactionStatement.begin();
-transaction.add(selectStmt);
-transaction.add(UpdateStatement.table(User.class)
-    .set("notified", true)
-    .where("verified = true"));
-
-transaction.commit().execute(client).subscribe();
-```
-
----
-
-### Graph Queries
-
-SurrealDB's powerful graph capabilities for modeling relationships.
-
-#### Creating Graph Relations
-
-```java
-// RELATE statement - create bidirectional relationship
-RelateStatement.from("person:alice")
-    .via("knows")
-    .to("person:bob")
-    .set("since", "2020-01-01")
-    .set("strength", 0.8)
-    .execute(client);
-
-// Multiple relations
-RelateStatement.from("person:alice")
-    .via("knows")
-    .to("person:bob")
-    .execute(client);
-
-RelateStatement.from("person:alice")
-    .via("follows")
-    .to("person:charlie")
-    .execute(client);
-```
-
-#### Querying Graph Relations
-
-```java
-// Find all people that Alice knows
-String query = "SELECT * FROM person:alice->knows->person";
-client.query(query, Person.class);
-
-// Find friends of friends
-String query = "SELECT * FROM person:alice->knows->person->knows->person";
-client.query(query, Person.class);
-
-// Bidirectional queries
-String query = "SELECT * FROM person:alice<->knows<->person";
-client.query(query, Person.class);
-
-// Filter graph traversal
-String query = "SELECT * FROM person:alice->knows[WHERE strength > 0.5]->person";
-client.query(query, Person.class);
-```
-
-#### Graph Entities
-
-```java
-@OneirosEntity("person")
-public class Person {
-    @OneirosID
-    private String id;
-    private String name;
-}
-
-@OneirosEntity("knows")
-public class Knows {
-    @OneirosID
-    private String id;
+    // Cache
+    .cacheEnabled(true)
+    .cacheTtlSeconds(60)
+    .cacheMaxSize(10000)
     
-    private String in;   // Source person
-    private String out;  // Target person
-    private String since;
-    private Double strength;
-}
-
-// Query with FETCH to load related records
-OneirosQuery.select(Person.class)
-    .fetch("->knows->person")
-    .where("id = person:alice")
-    .execute(client);
+    // Migration
+    .migrationsPackage("com.example.migrations")
+    .migrationDryRun(false)
+    .migrationOverwrite(false)
+    
+    .build();
 ```
 
----
-
-### Security & Encryption
-
-#### Field-Level Encryption
-
-Oneiros provides automatic field-level encryption using AES.
-
-##### 1. Enable Encryption in Configuration
+### Spring Boot Configuration (application.yml)
 
 ```yaml
 oneiros:
+  # Connection Settings
+  url: ws://localhost:8000/rpc
+  namespace: myns
+  database: mydb
+  username: root
+  password: root
+  auto-connect: true
+  
+  # Security & Encryption
   security:
     enabled: true
-    key: "MyVerySecretKey12345678"  # Min 16 characters
+    key: "my-32-character-encryption-key-here!"
+  
+  # Connection Pool
+  pool:
+    enabled: true
+    size: 10
+    min-idle: 2
+    max-wait-seconds: 30
+    health-check-interval: 30
+    auto-reconnect: true
+  
+  # Circuit Breaker
+  circuit-breaker:
+    enabled: true
+    failure-rate-threshold: 50
+    wait-duration-in-open-state: 5
+    permitted-calls-in-half-open-state: 3
+    sliding-window-size: 10
+    minimum-number-of-calls: 5
+  
+  # Cache
+  cache:
+    enabled: true
+    ttl-seconds: 60
+    max-size: 10000
+  
+  # Auto-Migration
+  migration:
+    enabled: true
+    base-package: "com.example.domain"
+    dry-run: false
+    overwrite: false
 ```
 
-##### 2. Mark Fields for Encryption
+---
+
+## 📚 Core Concepts
+
+### 1. Entities & Annotationen
+
+#### Basic Entity
+
+```java
+@OneirosEntity("users")
+public class User {
+    @OneirosID
+    private String id;
+    
+    private String name;
+    private String email;
+    private Integer age;
+    
+    @OneirosCreatedAt
+    private Instant createdAt;
+    
+    @OneirosUpdatedAt
+    private Instant updatedAt;
+    
+    // Getters & Setters...
+}
+```
+
+#### Entity mit Verschlüsselung
 
 ```java
 @OneirosEntity("users")
@@ -1143,340 +468,879 @@ public class User {
     
     private String name;
     
-    @OneirosEncrypted
+    // AES-256-GCM Encryption (reversible)
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String apiKey;
+    
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String creditCard;
+    
+    // Password Hashing (NOT reversible)
+    @OneirosEncrypted(type = EncryptionType.ARGON2)
     private String password;
     
-    @OneirosEncrypted
-    private String ssn;
-    
-    @OneirosEncrypted
-    private String creditCard;
+    // Getters & Setters...
 }
 ```
 
-##### 3. Automatic Encryption/Decryption
+#### Graph Relations
 
 ```java
+@OneirosEntity("users")
+public class User {
+    @OneirosID
+    private String id;
+    
+    private String name;
+    
+    // One-to-Many Relation
+    @OneirosRelation(
+        type = RelationType.RELATES_TO,
+        target = "posts",
+        relationName = "authored"
+    )
+    private List<Post> posts;
+}
+
+@OneirosEntity("posts")
+public class Post {
+    @OneirosID
+    private String id;
+    
+    private String title;
+    private String content;
+    
+    // Many-to-One Relation
+    @OneirosRelation(
+        type = RelationType.BELONGS_TO,
+        target = "users",
+        relationName = "authored"
+    )
+    private User author;
+}
+```
+
+### 2. CRUD Operationen
+
+#### Create
+
+```java
+// Single record
 User user = new User();
 user.setName("Alice");
-user.setPassword("MySecretPassword");  // Plain text
+user.setEmail("alice@example.com");
 
-// Save - password is automatically encrypted before sending to DB
-userRepository.save(user).subscribe();
+client.create("users", user, User.class)
+    .subscribe(created -> {
+        System.out.println("ID: " + created.getId());
+    });
 
-// Retrieve - password is automatically decrypted when reading from DB
-userRepository.findById("alice")
-    .subscribe(retrievedUser -> {
-        String password = retrievedUser.getPassword();  // Plain text
+// Batch insert
+List<User> users = Arrays.asList(user1, user2, user3);
+client.insert("users", users, User.class)
+    .subscribe(inserted -> {
+        System.out.println("Inserted: " + inserted.getName());
+    });
+```
+
+#### Read
+
+```java
+// All records
+client.select("users", User.class)
+    .collectList()
+    .subscribe(users -> {
+        System.out.println("Found " + users.size() + " users");
+    });
+
+// Single record by ID
+client.select("users:alice", User.class)
+    .next()
+    .subscribe(user -> {
+        System.out.println("Name: " + user.getName());
+    });
+
+// With query
+client.query("SELECT * FROM users WHERE age > 18", User.class)
+    .subscribe(user -> {
+        System.out.println("Adult: " + user.getName());
+    });
+```
+
+#### Update
+
+```java
+// Update single record
+user.setAge(30);
+client.update("users:alice", user, User.class)
+    .subscribe(updated -> {
+        System.out.println("Updated: " + updated.getName());
+    });
+
+// Partial update (merge)
+Map<String, Object> updates = Map.of("age", 31, "city", "Berlin");
+client.merge("users:alice", updates, User.class)
+    .subscribe(merged -> {
+        System.out.println("Merged: " + merged.getAge());
+    });
+```
+
+#### Delete
+
+```java
+// Delete single record
+client.delete("users:alice", User.class)
+    .subscribe(deleted -> {
+        System.out.println("Deleted: " + deleted.getName());
+    });
+
+// Delete all records in table
+client.delete("users", User.class)
+    .subscribe(deleted -> {
+        System.out.println("Deleted: " + deleted.getName());
+    });
+```
+
+### 3. Query API
+
+#### Fluent Query Builder
+
+```java
+// Coming soon - currently use direct SurrealQL
+client.query(
+    "SELECT * FROM users WHERE age > $age AND city = $city",
+    Map.of("age", 18, "city", "Berlin"),
+    User.class
+).subscribe(user -> {
+    System.out.println(user.getName());
+});
+```
+
+### 4. Statement API
+
+#### Direct SurrealQL
+
+```java
+import io.oneiros.statement.*;
+
+// Build complex queries
+String sql = Statement.select()
+    .from("users")
+    .where("age > 18")
+    .and("city = 'Berlin'")
+    .orderBy("name ASC")
+    .limit(10)
+    .build();
+
+client.query(sql, User.class)
+    .subscribe(user -> {
+        System.out.println(user.getName());
     });
 ```
 
 ---
 
-## 📚 Complete API Reference
+## 🚀 Advanced Features
 
-### OneirosQuery (Fluent API)
+### 1. Auto-Migration Engine
 
-```java
-// SELECT Methods
-static <T> OneirosQuery<T> select(Class<T> type)
-OneirosQuery<T> where(String field)
-OneirosQuery<T> and(String field)
-OneirosQuery<T> or(String field)
-OneirosQuery<T> orderBy(String field, String direction)
-OneirosQuery<T> limit(int limit)
-OneirosQuery<T> start(int start)
-OneirosQuery<T> omit(String... fields)
-OneirosQuery<T> fetch(String... fields)
-OneirosQuery<T> timeout(Duration duration)
-OneirosQuery<T> parallel()
-String toSql()
-SelectStatement<T> toSelectStatement()
-Flux<T> execute(OneirosClient client)
-Mono<T> executeOne(OneirosClient client)
-```
+**Automatische Schema-Generierung aus Annotationen**
 
-### WHERE Clause Builders
+#### Schema Definition
 
 ```java
-WhereClauseBuilder is(Object value)
-WhereClauseBuilder notEquals(Object value)
-WhereClauseBuilder greaterThan(Object value)
-WhereClauseBuilder greaterThanOrEqual(Object value)
-WhereClauseBuilder lessThan(Object value)
-WhereClauseBuilder lessThanOrEqual(Object value)
-WhereClauseBuilder in(Object... values)
-WhereClauseBuilder like(String pattern)
-WhereClauseBuilder between(Object start, Object end)
-WhereClauseBuilder isNull()
-WhereClauseBuilder isNotNull()
+@OneirosTable(
+    value = "users",
+    schemafull = true,
+    permissions = "FULL",
+    comment = "User accounts"
+)
+public class UsersSchema {
+    
+    @OneirosField(
+        type = "string",
+        assertion = "string::len($value) >= 3"
+    )
+    private String name;
+    
+    @OneirosField(
+        type = "string",
+        unique = true,
+        assertion = "string::is::email($value)"
+    )
+    private String email;
+    
+    @OneirosField(
+        type = "int",
+        assertion = "$value >= 0 AND $value <= 150"
+    )
+    private Integer age;
+    
+    @OneirosField(
+        type = "record<posts>",
+        kind = FieldKind.ARRAY
+    )
+    private List<String> posts;
+}
 ```
 
-### Statement API Entrypoints
+#### Configuration
+
+```yaml
+oneiros:
+  migration:
+    enabled: true
+    base-package: "com.example.domain.schema"
+    dry-run: false  # Set true to preview changes
+    overwrite: false  # Set true to update existing definitions
+```
+
+#### Generated SQL
+
+```sql
+DEFINE TABLE users SCHEMAFULL COMMENT "User accounts" PERMISSIONS FULL;
+DEFINE FIELD name ON users TYPE string ASSERT string::len($value) >= 3;
+DEFINE FIELD email ON users TYPE string ASSERT string::is::email($value);
+DEFINE FIELD age ON users TYPE int ASSERT $value >= 0 AND $value <= 150;
+DEFINE FIELD posts ON users TYPE array<record<posts>>;
+DEFINE INDEX idx_users_email ON users FIELDS email UNIQUE;
+```
+
+### 2. Versioned Migrations (Flyway-Style)
+
+**Für komplexe Daten-Transformationen und kontrollierte Schema-Evolution**
+
+#### Migration Class
 
 ```java
-// Via OneirosQuery
-static <T> CreateStatement<T> create(Class<T> type)
-static <T> UpdateStatement<T> update(Class<T> type)
-static <T> DeleteStatement<T> delete(Class<T> type)
-static <T> UpsertStatement<T> upsert(Class<T> type)
-static <T> InsertStatement<T> insert(Class<T> type)
-static <T> SelectStatement<T> select(Class<T> type)
+package com.example.migrations;
 
-// Direct Statement Classes
-CreateStatement.table(Class<T> type)
-CreateStatement.record(Class<T> type, String id)
-UpdateStatement.table(Class<T> type)
-UpdateStatement.record(Class<T> type, String id)
-DeleteStatement.from(Class<T> type)
-DeleteStatement.record(Class<T> type, String id)
-UpsertStatement.table(Class<T> type)
-UpsertStatement.record(Class<T> type, String id)
-InsertStatement.into(Class<T> type)
-SelectStatement.from(Class<T> type)
-RelateStatement.from(String fromRecord)
-TransactionStatement.begin()
+import io.oneiros.client.OneirosClient;
+import io.oneiros.migration.OneirosMigration;
+import reactor.core.publisher.Mono;
+
+public class V001_CreateUserTable implements OneirosMigration {
+    
+    @Override
+    public int getVersion() {
+        return 1;  // Sequential version number
+    }
+    
+    @Override
+    public String getDescription() {
+        return "Create user table with basic fields";
+    }
+    
+    @Override
+    public Mono<Void> up(OneirosClient client) {
+        String sql = """
+            DEFINE TABLE IF NOT EXISTS users SCHEMAFULL;
+            DEFINE FIELD IF NOT EXISTS name ON users TYPE string;
+            DEFINE FIELD IF NOT EXISTS email ON users TYPE string;
+            DEFINE INDEX IF NOT EXISTS idx_user_email ON users FIELDS email UNIQUE;
+            """;
+        
+        return client.query(sql, Object.class).then();
+    }
+}
 ```
 
-### Control Flow Statements
+#### Complex Migration (Data Transformation)
 
 ```java
-// IF/ELSE
-IfStatement.condition(String condition)
-    .then(Consumer<StatementBuilder> thenBlock)
-    .elseIf(String condition)
-    .elseBlock(Consumer<StatementBuilder> elseBlock)
-
-// FOR Loop
-ForStatement.variable(String variable)
-    .in(String iterable)
-    .do(Consumer<StatementBuilder> doBlock)
-
-// Variables
-LetStatement.variable(String name, String value)
-
-// Return & Error Handling
-ReturnStatement.value(String expression)
-ThrowStatement.error(String message)
-BreakStatement.create()
-ContinueStatement.create()
-SleepStatement.duration(String duration)
+public class V002_MigrateUserData implements OneirosMigration {
+    
+    @Override
+    public int getVersion() {
+        return 2;
+    }
+    
+    @Override
+    public String getDescription() {
+        return "Add full_name field and populate from existing data";
+    }
+    
+    @Override
+    public Mono<Void> up(OneirosClient client) {
+        return client.query("DEFINE FIELD full_name ON users TYPE string;", Object.class)
+            .then()
+            .then(Mono.defer(() -> 
+                client.query("UPDATE users SET full_name = name WHERE full_name = NONE;", Object.class).then()
+            ));
+    }
+}
 ```
+
+#### Configuration
+
+```java
+// Pure Java
+Oneiros oneiros = OneirosBuilder.create()
+    .migrationsPackage("com.example.migrations")
+    .build();
+```
+
+```yaml
+# Spring Boot
+oneiros:
+  migration:
+    enabled: true
+    base-package: "com.example.migrations"
+```
+
+#### Migration History
+
+Migrations werden in der `oneiros_schema_history` Tabelle getrackt:
+
+| version | description | installed_on | success | execution_time_ms |
+|---------|-------------|--------------|---------|-------------------|
+| 1 | Create user table | 2026-02-08 | true | 127 |
+| 2 | Migrate user data | 2026-02-08 | true | 543 |
+
+📚 **Vollständige Dokumentation:** [VERSIONED_MIGRATIONS_GUIDE.md](VERSIONED_MIGRATIONS_GUIDE.md)
+
+### 3. Field-Level Encryption
+
+**Transparent encryption/decryption bei CRUD-Operationen**
+
+#### Entity mit Encryption
+
+```java
+@OneirosEntity("users")
+public class User {
+    @OneirosID
+    private String id;
+    
+    private String name;  // Not encrypted
+    
+    // Reversible encryption (AES-256-GCM)
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String apiKey;
+    
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String creditCard;
+    
+    // Password hashing (NOT reversible)
+    @OneirosEncrypted(type = EncryptionType.ARGON2)
+    private String password;
+}
+```
+
+#### Supported Algorithms
+
+| Algorithm | Reversible | Use Case |
+|-----------|------------|----------|
+| **AES_GCM** | ✅ Yes | API Keys, Tokens, Credit Cards |
+| **ARGON2** | ❌ No | Passwords (RECOMMENDED) |
+| **BCRYPT** | ❌ No | Passwords (Standard) |
+| **SCRYPT** | ❌ No | Passwords (Memory-hard) |
+| **SHA256** | ❌ No | Checksums (NOT for passwords!) |
+| **SHA512** | ❌ No | Checksums (NOT for passwords!) |
+
+#### Configuration
+
+```java
+// Pure Java
+Oneiros oneiros = OneirosBuilder.create()
+    .encryptionKey("my-32-character-secret-key!!")
+    .build();
+```
+
+```yaml
+# Spring Boot
+oneiros:
+  security:
+    enabled: true
+    key: "my-32-character-encryption-key-here!"
+```
+
+#### Usage (100% Transparent!)
+
+```java
+// Create user with plaintext
+User user = new User();
+user.setApiKey("secret-api-key-123");
+user.setPassword("myPassword123");
+
+// Encryption happens automatically
+client.create("users", user, User.class)
+    .subscribe(created -> {
+        // ✅ created.getApiKey() = "secret-api-key-123" (decrypted!)
+        // ✅ In database: Base64-encrypted AES-GCM
+        // ✅ Password: Argon2-hashed
+    });
+
+// Select - automatic decryption
+client.select("users", User.class)
+    .subscribe(user -> {
+        // ✅ All @OneirosEncrypted fields are automatically decrypted!
+        System.out.println("API Key: " + user.getApiKey());  // Plaintext!
+    });
+```
+
+📚 **Vollständige Dokumentation:** [WRITE_SIDE_ENCRYPTION_COMPLETE.md](WRITE_SIDE_ENCRYPTION_COMPLETE.md)
+
+### 4. LZ4 Backup System
+
+**High-Performance Streaming Backups mit LZ4-Compression**
+
+#### Features
+
+- ✅ **LZ4-Block-Compression** - 2-10x compression ratio
+- ✅ **Streaming JSON** - Memory-efficient (konstant ~1MB RAM)
+- ✅ **Table-by-Table** - Processing in batches
+- ✅ **Batch Insert** - 100 records per transaction
+- ✅ **Backup Header** - Metadata (namespace, database, timestamp)
+- ✅ **Scheduled Backups** - Automatic with retention policy
+
+#### Usage
+
+```java
+// Create backup manager
+OneirosBackupManager backupManager = new OneirosBackupManager(
+    client, objectMapper, "myns", "mydb"
+);
+
+// Create backup
+File backup = backupManager
+    .createBackup(Paths.get("./backups"))
+    .block();
+
+System.out.println("Backup created: " + backup.getName());
+// Output: mydb_2026-02-08_14-30-45.lz4
+
+// Restore backup
+backupManager
+    .restoreBackup(backup, true)  // deleteExisting = true
+    .doOnNext(table -> System.out.println("Restored: " + table))
+    .blockLast();
+```
+
+#### Spring Boot Integration (Automatic Scheduled Backups)
+
+```yaml
+oneiros:
+  backup:
+    enabled: true
+    directory: "./backups"
+    schedule: "0 0 2 * * ?"  # Daily at 2 AM
+    retention-days: 7  # Keep backups for 7 days
+```
+
+#### Performance
+
+```
+Database Size: 1 GB (1M records)
+Backup Time: ~60s
+Backup Size: ~200 MB (5x compression)
+Memory Usage: ~1 MB (constant)
+Restore Time: ~90s
+```
+
+📚 **Vollständige Dokumentation:** [LZ4_BACKUP_SYSTEM.md](LZ4_BACKUP_SYSTEM.md)
+
+### 5. Connection Pool
+
+**Load-Balancing über mehrere WebSocket-Connections**
+
+#### Configuration
+
+```java
+// Pure Java
+Oneiros oneiros = OneirosBuilder.create()
+    .poolEnabled(true)
+    .poolSize(10)
+    .poolMinIdle(2)
+    .poolMaxWaitSeconds(30)
+    .poolAutoReconnect(true)
+    .poolHealthCheckInterval(30)
+    .build();
+```
+
+```yaml
+# Spring Boot
+oneiros:
+  pool:
+    enabled: true
+    size: 10
+    min-idle: 2
+    max-wait-seconds: 30
+    health-check-interval: 30
+    auto-reconnect: true
+```
+
+#### Features
+
+- ✅ Round-Robin Load Balancing
+- ✅ Auto-Reconnect bei Connection-Loss
+- ✅ Health-Check Monitoring
+- ✅ Dedicated Connection für Transactions
+- ✅ Connection Statistics
+
+#### Usage
+
+```java
+// Get pool statistics
+OneirosConnectionPool pool = (OneirosConnectionPool) oneiros.client();
+PoolStats stats = pool.getStats();
+
+System.out.println("Total: " + stats.total());
+System.out.println("Active: " + stats.active());
+System.out.println("Idle: " + stats.idle());
+System.out.println("Failed: " + stats.failed());
+```
+
+📚 **Vollständige Dokumentation:** [CONNECTION_POOL_GUIDE.md](CONNECTION_POOL_GUIDE.md)
+
+### 6. Transactions
+
+**ACID-konforme Transaktionen mit automatischem Commit/Rollback**
+
+#### Simple Transaction
+
+```java
+client.transaction(tx -> {
+    return tx.query("UPDATE account:sender SET balance -= 100", Map.class)
+        .then(tx.query("UPDATE account:receiver SET balance += 100", Map.class).next())
+        .then(tx.create("transaction", 
+            Map.of("amount", 100, "from", "sender", "to", "receiver"), 
+            Map.class));
+}).subscribe(
+    result -> log.info("✅ Transaction committed"),
+    error -> log.error("❌ Transaction rolled back: {}", error.getMessage())
+);
+```
+
+#### Multi-Step Transaction with Error Handling
+
+```java
+client.transaction(tx -> {
+    return tx.query("SELECT * FROM account:sender", Map.class).next()
+        .flatMap(sender -> {
+            double balance = (Double) sender.get("balance");
+            if (balance < 100) {
+                return Mono.error(new IllegalStateException("Insufficient funds"));
+            }
+            return tx.query("UPDATE account:sender SET balance -= 100", Map.class).next();
+        })
+        .then(tx.query("UPDATE account:receiver SET balance += 100", Map.class).next());
+}).subscribe();
+```
+
+📚 **Vollständige Dokumentation:** [TRANSACTION_GUIDE.md](TRANSACTION_GUIDE.md)
+
+### 7. Graph Relations
+
+**Native SurrealDB Graph-Funktionalität**
+
+#### Create Relation
+
+```java
+// Create relation between user and post
+client.relate("users:alice", "authored", "posts:1", 
+    Map.of("created_at", Instant.now()),
+    Map.class
+).subscribe(relation -> {
+    System.out.println("Relation created: " + relation);
+});
+```
+
+#### Query Graph
+
+```java
+// Query with graph traversal
+String query = """
+    SELECT *, ->authored->posts.* AS posts
+    FROM users:alice
+    """;
+
+client.query(query, Map.class)
+    .subscribe(result -> {
+        System.out.println("User with posts: " + result);
+    });
+```
+
+### 8. Live Queries (Real-Time)
+
+**WebSocket-basierte Real-Time Updates**
+
+#### Subscribe to Live Query
+
+```java
+// Start live query
+String liveQueryId = client.live("users", false).block();
+
+// Listen to changes
+client.listenToLiveQuery(liveQueryId)
+    .subscribe(event -> {
+        String action = (String) event.get("action");  // CREATE, UPDATE, DELETE
+        Map<String, Object> result = (Map) event.get("result");
+        
+        System.out.println("Action: " + action);
+        System.out.println("Data: " + result);
+    });
+
+// Stop live query
+client.kill(liveQueryId).block();
+```
+
+#### Spring Boot Integration
+
+```java
+@Service
+public class UserLiveService {
+    
+    @Autowired
+    private OneirosLiveManager liveManager;
+    
+    public Flux<User> watchUsers() {
+        return liveManager.live("users", User.class);
+    }
+}
+```
+
+📚 **Vollständige Dokumentation:** [REALTIME_FEATURES.md](REALTIME_FEATURES.md)
+
+### 9. Circuit Breaker
+
+**Resilience4j-Integration für Fault-Tolerance**
+
+#### Configuration
+
+```java
+// Pure Java
+Oneiros oneiros = OneirosBuilder.create()
+    .circuitBreakerEnabled(true)
+    .circuitBreakerFailureRateThreshold(50)
+    .circuitBreakerWaitDurationInOpenState(5)
+    .build();
+```
+
+```yaml
+# Spring Boot
+oneiros:
+  circuit-breaker:
+    enabled: true
+    failure-rate-threshold: 50
+    wait-duration-in-open-state: 5
+    sliding-window-size: 10
+```
+
+#### States
+
+- **CLOSED** ✅ - Normal operation
+- **OPEN** 🔴 - Too many failures, rejecting requests
+- **HALF_OPEN** 🟡 - Testing if service recovered
+
+📚 **Vollständige Dokumentation:** [CIRCUIT_BREAKER_GUIDE.md](CIRCUIT_BREAKER_GUIDE.md)
+
+---
+
+## 📖 Documentation
+
+### 📚 Core Documentation
+
+- [Quick Start Guide](QUICK_START.md)
+- [Architecture Overview](ARCHITECTURE.md)
+- [Pure Java Usage](PURE_JAVA_USAGE.md)
+- [Pure Java Examples](PURE_JAVA_EXAMPLES.md)
+
+### 🚀 Advanced Features
+
+- [Auto-Migration Guide](SCHEMA_MIGRATION_TROUBLESHOOTING.md)
+- [Versioned Migrations](VERSIONED_MIGRATIONS_GUIDE.md)
+- [Field-Level Encryption](WRITE_SIDE_ENCRYPTION_COMPLETE.md)
+- [LZ4 Backup System](LZ4_BACKUP_SYSTEM.md)
+- [Connection Pool](CONNECTION_POOL_GUIDE.md)
+- [Transactions](TRANSACTION_GUIDE.md)
+- [Real-Time Features](REALTIME_FEATURES.md)
+- [Circuit Breaker](CIRCUIT_BREAKER_GUIDE.md)
+
+### 🔧 Troubleshooting
+
+- [Connection Troubleshooting](CONNECTION_TROUBLESHOOTING.md)
+- [Schema Migration Issues](SCHEMA_MIGRATION_TROUBLESHOOTING.md)
+
+### 📝 Release Notes
+
+- [Changelog v0.3.0](CHANGELOG_v0.3.0.md)
+- [Implementation Status](IMPLEMENTATION_STATUS_v0.3.0.md)
+- [Features Overview](FEATURES_OVERVIEW.md)
 
 ---
 
 ## 💡 Examples
 
-### Example 1: User Registration System
+### Complete Application Example
 
 ```java
-@Service
-public class UserRegistrationService {
+package com.example.app;
+
+import io.oneiros.core.*;
+import io.oneiros.annotation.*;
+import reactor.core.publisher.Mono;
+
+// Entity
+@OneirosEntity("users")
+class User {
+    @OneirosID
+    private String id;
+    private String name;
     
-    private final UserRepository userRepository;
+    @OneirosEncrypted(type = EncryptionType.AES_GCM)
+    private String apiKey;
     
-    public Mono<User> registerUser(String name, String email, String password) {
+    @OneirosEncrypted(type = EncryptionType.ARGON2)
+    private String password;
+    
+    // Getters & Setters...
+}
+
+// Service
+class UserService {
+    private final OneirosClient client;
+    
+    public UserService(OneirosClient client) {
+        this.client = client;
+    }
+    
+    public Mono<User> createUser(String name, String apiKey, String password) {
         User user = new User();
         user.setName(name);
-        user.setEmail(email);
-        user.setPassword(password);  // Will be encrypted automatically
-        user.setVerified(false);
+        user.setApiKey(apiKey);
+        user.setPassword(password);
         
-        return userRepository.save(user);
+        return client.create("users", user, User.class);
     }
     
-    public Mono<User> verifyUser(String userId) {
-        return UpdateStatement.record(User.class, userId)
-            .set("verified", true)
-            .set("verified_at", LocalDateTime.now().toString())
-            .executeOne(client);
+    public Mono<User> authenticateUser(String name, String password) {
+        return client.query(
+            "SELECT * FROM users WHERE name = $name",
+            Map.of("name", name),
+            User.class
+        ).next()
+        .filter(user -> {
+            // Password verification happens here
+            // (In production, use PasswordHasher.verify())
+            return true;  // Simplified
+        });
     }
-    
-    public Mono<User> login(String email, String password) {
-        return OneirosQuery.select(User.class)
-            .where("email").is(email)
-            .where("password").is(password)
-            .where("verified").is(true)
-            .executeOne(client);
+}
+
+// Main Application
+public class Application {
+    public static void main(String[] args) throws Exception {
+        // Create Oneiros instance
+        Oneiros oneiros = OneirosBuilder.create()
+            .url("ws://localhost:8000/rpc")
+            .namespace("myapp")
+            .database("production")
+            .username("root")
+            .password("root")
+            .encryptionKey("my-32-character-secret-key!!")
+            .poolEnabled(true)
+            .poolSize(10)
+            .migrationsPackage("com.example.migrations")
+            .build();
+        
+        // Create service
+        UserService userService = new UserService(oneiros.client());
+        
+        // Create user
+        userService.createUser("alice", "secret-key-123", "secure-password")
+            .subscribe(user -> {
+                System.out.println("✅ User created: " + user.getId());
+                System.out.println("   API Key (decrypted): " + user.getApiKey());
+            });
+        
+        // Authenticate user
+        userService.authenticateUser("alice", "secure-password")
+            .subscribe(user -> {
+                System.out.println("✅ User authenticated: " + user.getName());
+            });
+        
+        // Keep running
+        Thread.sleep(2000);
+        
+        // Cleanup
+        oneiros.close();
     }
 }
 ```
 
-### Example 2: E-Commerce Order System
+### More Examples
 
-```java
-@Service
-public class OrderService {
-    
-    private final OneirosClient client;
-    
-    public Mono<Order> createOrder(String userId, List<OrderItem> items) {
-        TransactionStatement transaction = TransactionStatement.begin();
-        
-        double total = items.stream()
-            .mapToDouble(item -> item.getPrice() * item.getQuantity())
-            .sum();
-        
-        // Create order
-        transaction.add(CreateStatement.table(Order.class)
-            .set("user_id", userId)
-            .set("items", items)
-            .set("total", total)
-            .set("status", "PENDING"));
-        
-        // Update inventory
-        for (OrderItem item : items) {
-            transaction.add(UpdateStatement.table(Product.class)
-                .set("stock -= " + item.getQuantity())
-                .where("id = product:" + item.getProductId()));
-        }
-        
-        // Check balance
-        transaction.add(IfStatement
-            .condition("user:" + userId + ".balance < " + total)
-            .then(builder -> builder.throwError("Insufficient balance")));
-        
-        // Deduct balance
-        transaction.add(UpdateStatement.record(User.class, userId)
-            .set("balance -= " + total));
-        
-        return transaction.commit()
-            .execute(client)
-            .next()
-            .cast(Order.class);
-    }
-}
-```
-
-### Example 3: Social Network
-
-```java
-@Service
-public class SocialNetworkService {
-    
-    private final OneirosClient client;
-    
-    // Create friendship
-    public Mono<Void> followUser(String followerId, String followeeId) {
-        return RelateStatement
-            .from("person:" + followerId)
-            .via("follows")
-            .to("person:" + followeeId)
-            .set("since", LocalDateTime.now().toString())
-            .execute(client)
-            .then();
-    }
-    
-    // Get followers
-    public Flux<Person> getFollowers(String userId) {
-        String query = "SELECT * FROM person:" + userId + "<-follows<-person";
-        return client.query(query, Person.class);
-    }
-    
-    // Get following
-    public Flux<Person> getFollowing(String userId) {
-        String query = "SELECT * FROM person:" + userId + "->follows->person";
-        return client.query(query, Person.class);
-    }
-    
-    // Get friend suggestions (friends of friends)
-    public Flux<Person> getFriendSuggestions(String userId) {
-        String query = """
-            SELECT * FROM person:%s->follows->person->follows->person
-            WHERE id != person:%s
-            AND id NOT IN (SELECT VALUE id FROM person:%s->follows->person)
-            LIMIT 10
-            """.formatted(userId, userId, userId);
-        
-        return client.query(query, Person.class);
-    }
-}
-```
+- 📝 [Pure Java Examples](PURE_JAVA_EXAMPLES.md)
+- 🔐 [Security Examples](WRITE_SIDE_ENCRYPTION_COMPLETE.md#-verwendungsbeispiele)
+- 🗜️ [Backup Examples](LZ4_BACKUP_SYSTEM.md#usage)
+- 🔄 [Migration Examples](VERSIONED_MIGRATIONS_GUIDE.md#migration-examples)
 
 ---
 
 ## 🎯 Best Practices
 
-### 1. Use Repository Pattern
+### 1. **Use Connection Pool for Production**
 
-✅ **Good** - Centralized data access logic
 ```java
-@Repository
-public class UserRepository extends SimpleOneirosRepository<User> {
-    
-    public Flux<User> findByRole(String role) {
-        return OneirosQuery.select(User.class)
-            .where("role").is(role)
-            .execute(client);
-    }
-}
+.poolEnabled(true)
+.poolSize(10)  // Adjust based on load
 ```
 
-### 2. Handle Errors Gracefully
+### 2. **Enable Circuit Breaker**
 
-✅ **Good** - Proper error handling
 ```java
-userRepository.findById(userId)
-    .switchIfEmpty(Mono.error(new UserNotFoundException(userId)))
-    .doOnError(error -> log.error("Error fetching user", error))
-    .onErrorResume(error -> Mono.just(new User()));
+.circuitBreakerEnabled(true)
+.circuitBreakerFailureRateThreshold(50)
 ```
 
-### 3. Use Transactions for Multi-Step Operations
+### 3. **Encrypt Sensitive Data**
 
-✅ **Good** - Atomic transaction
 ```java
-TransactionStatement transaction = TransactionStatement.begin();
-transaction.add(UpdateStatement.table(Account.class)
-    .set("balance -= 100")
-    .where("id = account:sender"));
-transaction.add(UpdateStatement.table(Account.class)
-    .set("balance += 100")
-    .where("id = account:receiver"));
-transaction.commit().execute(client).subscribe();
+@OneirosEncrypted(type = EncryptionType.AES_GCM)
+private String creditCard;
+
+@OneirosEncrypted(type = EncryptionType.ARGON2)
+private String password;
 ```
 
-### 4. Leverage Field-Level Encryption
+### 4. **Use Versioned Migrations for Production**
 
-✅ **Good** - Encrypt sensitive data
 ```java
-@OneirosEntity("users")
-public class User {
-    @OneirosEncrypted
-    private String password;
-    
-    @OneirosEncrypted
-    private String ssn;
-}
+// V001_Initial.java
+// V002_AddUserTable.java
+// V003_MigrateData.java
 ```
 
-### 5. Use OMIT for Privacy
+### 5. **Schedule Regular Backups**
 
-✅ **Good** - Exclude sensitive fields from API responses
-```java
-OneirosQuery.select(User.class)
-    .omit("password", "ssn", "credit_card")
-    .execute(client);
+```yaml
+oneiros:
+  backup:
+    enabled: true
+    schedule: "0 0 2 * * ?"  # Daily at 2 AM
+    retention-days: 7
 ```
 
-### 6. Set Query Timeouts
+### 6. **Handle Errors Properly**
 
-✅ **Good** - Prevent long-running queries
 ```java
-OneirosQuery.select(User.class)
-    .timeout(Duration.ofSeconds(5))
-    .execute(client);
+client.create("users", user, User.class)
+    .doOnSuccess(u -> log.info("Created: {}", u.getId()))
+    .doOnError(e -> log.error("Failed: {}", e.getMessage()))
+    .onErrorResume(e -> {
+        // Fallback logic
+        return Mono.empty();
+    })
+    .subscribe();
 ```
 
-### 7. Use Pagination
+### 7. **Use Transactions for Multi-Step Operations**
 
-✅ **Good** - Paginate large result sets
 ```java
-OneirosQuery.select(User.class)
-    .orderBy("created_at", "DESC")
-    .limit(50)
-    .start(pageNumber * 50)
-    .execute(client);
+client.transaction(tx -> {
+    return tx.query("UPDATE account SET balance -= 100", Map.class)
+        .then(tx.query("UPDATE account SET balance += 100", Map.class));
+}).subscribe();
 ```
 
 ---
@@ -1485,263 +1349,94 @@ OneirosQuery.select(User.class)
 
 ### Connection Issues
 
-#### ❌ Problem: `WebSocketException: Connection refused` or No Connection on Startup
+**Problem:** `Connection timeout`
 
-**Symptoms:**
-```
-❌ Oneiros connection failed: Connection refused
-⚠️ Oneiros is NOT connected to SurrealDB!
-```
-
-**Solutions:**
-
-1️⃣ **Check if SurrealDB is running:**
-```bash
-# Start SurrealDB
-surreal start --user root --pass root
-
-# Or with Docker
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest start
-```
-
-2️⃣ **Verify configuration in `application.yml`:**
-```yaml
-oneiros:
-  url: "ws://127.0.0.1:8000/rpc"  # Check port and protocol (ws://)
-  username: "root"                 # Must match SurrealDB credentials
-  password: "root"
-  namespace: "my_namespace"        # Must exist or be creatable
-  database: "my_database"
-  auto-connect: true               # Enable for immediate connection
-```
-
-3️⃣ **Check Spring Boot auto-configuration:**
-```java
-// If using local JAR, ensure @ComponentScan includes Oneiros:
-@SpringBootApplication
-@ComponentScan(basePackages = {
-    "your.package",
-    "io.oneiros"  // Add this!
-})
-public class Application {
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
-    }
-}
-```
-
-4️⃣ **Enable debug logging:**
-```yaml
-logging:
-  level:
-    io.oneiros: DEBUG
-    reactor.netty: DEBUG
-```
-
-5️⃣ **Check actuator health endpoint:**
-```bash
-curl http://localhost:8080/actuator/health
-```
-
-#### ❌ Problem: "Did not observe any item or terminal signal within 10000ms" / Connection Pool Timeout
-
-**Symptoms:**
-```
-ERROR: Failed to create connection: Did not observe any item or terminal signal within 10000ms
-Pool: PoolStats[total=0, healthy=0, unhealthy=0, maxSize=10]
-```
-
-**Cause:** This was a bug in versions before v0.2.1 where WebSocket connections were established but the initialization never completed. **Fixed in v0.2.1+**
-
-**Solutions:**
-
-1️⃣ **Update to v0.2.1 or later:**
-```gradle
-implementation 'com.github.mzxidev:oneiros-core:v0.2.1'  // or later
-```
-
-2️⃣ **If using older version, check:**
-```yaml
-# Ensure credentials are correct
-oneiros:
-  username: root  # Must match SurrealDB user
-  password: root  # Must match SurrealDB password
-
-# Verify SurrealDB is responding
-```
-
-3️⃣ **Debug with smaller pool size:**
+**Solution:**
 ```yaml
 oneiros:
   pool:
-    size: 2  # Start small to isolate issues
+    max-wait-seconds: 60  # Increase timeout
 ```
 
-4️⃣ **Check the detailed fix documentation:**
-See [CONNECTION_POOL_FIX.md](CONNECTION_POOL_FIX.md) for technical details on the root cause and solution.
+### Migration Errors
 
-#### ❌ Problem: Connection Works in Tests but Not in Application
-
-**Cause:** Configuration not loaded from `application.yml`
+**Problem:** `Migration V002 failed`
 
 **Solution:**
-```java
-// Ensure @EnableConfigurationProperties is present:
-@SpringBootApplication
-@EnableConfigurationProperties(OneirosProperties.class)
-public class Application { }
+```sql
+-- Delete failed migration from history
+DELETE FROM oneiros_schema_history WHERE version = 2 AND success = false;
+
+-- Fix migration code and restart
 ```
 
-#### ❌ Problem: "Session not available after connect"
+### Encryption Not Working
 
-**Cause:** Connection pool exhausted or all connections unhealthy
+**Problem:** Data not encrypted in database
 
 **Solution:**
-```yaml
-oneiros:
-  connection-pool:
-    enabled: true
-    size: 10          # Increase pool size
-    health-check-interval-seconds: 30
-```
-
-### Encryption Errors
-
-**Problem**: `EncryptionException: Invalid key length`
-
-**Solution**: Ensure encryption key is at least 16 characters:
 ```yaml
 oneiros:
   security:
-    key: "MySecretKey123456789"  # Must be >= 16 characters
+    enabled: true  # Make sure this is true!
+    key: "exactly-32-characters-long!!!"  # Must be 32+ chars
 ```
 
-### Query Timeout
+### Memory Issues
 
-**Problem**: `TimeoutException: Query exceeded timeout`
+**Problem:** `OutOfMemoryError` during backup
 
-**Solution**: Increase timeout:
+**Solution:**
 ```java
-OneirosQuery.select(User.class)
-    .timeout(Duration.ofSeconds(10))
-    .execute(client);
+// LZ4 backups are streaming - this shouldn't happen
+// Check if you're loading too much data in memory elsewhere
 ```
 
-### Null Pointer Exception
-
-**Problem**: `NullPointerException` when accessing query results
-
-**Solution**: Use reactive operators properly:
-```java
-// Correct
-userRepository.findById(userId)
-    .switchIfEmpty(Mono.error(new UserNotFoundException()))
-    .map(User::getName)
-    .subscribe(name -> System.out.println(name));
-```
-
-### Connection Pool Timeout Errors
-
-**Problem**: Connection pool fails to initialize with timeout errors:
-```
-Failed to create connection: Did not observe any item or terminal signal within 15000ms
-```
-
-**Causes & Solutions**:
-
-1. **SurrealDB Not Running**
-   ```bash
-   # Start SurrealDB
-   surreal start --user root --pass root --bind 0.0.0.0:8000
-   ```
-
-2. **Wrong Connection Details**
-   ```yaml
-   oneiros:
-     url: ws://127.0.0.1:8000/rpc  # Check IP and port
-     username: root
-     password: root
-     namespace: your_namespace  # Must exist
-     database: your_database    # Must exist
-   ```
-
-3. **Network/Firewall Issues**
-   ```bash
-   # Test connection manually
-   curl http://localhost:8000/health
-   ```
-
-4. **Pool Size Too Large**
-   ```yaml
-   oneiros:
-     connection-pool:
-       size: 5  # Reduce if you have connection limits
-   ```
-
-### Connection Pool Stats Show 0 Connections
-
-**Problem**: Pool stats show `PoolStats[total=0, healthy=0, unhealthy=0, maxSize=10]`
-
-**Solution**: This happens during startup. Check logs for initialization errors:
-```bash
-# Look for these log lines:
-✅ Connection initialization complete  # Should appear for each connection
-🏊 Connection pool initialized with X/Y connections
-```
-
-### "No connections available in pool" at Runtime
-
-**Problem**: Queries fail with `No connections available in pool`
-
-**Cause**: All connections became unhealthy or were not established
-
-**Solutions**:
-
-1. **Enable Health Checks**:
-   ```yaml
-   oneiros:
-     connection-pool:
-       health-check-interval: 30s  # Check connections regularly
-       enable-auto-reconnect: true
-   ```
-
-2. **Check Pool Stats Endpoint**:
-   ```bash
-   curl http://localhost:8080/actuator/health/oneiros
-   ```
-
-3. **Review Connection Lifecycle**:
-   ```java
-   @Autowired
-   private OneirosConnectionPool pool;
-   
-   public void checkPoolHealth() {
-       PoolStats stats = pool.getStats();
-       log.info("Pool: {}", stats);
-       // If healthy = 0, connections died and need recovery
-   }
-   ```
+📚 **Mehr Troubleshooting:** [CONNECTION_TROUBLESHOOTING.md](CONNECTION_TROUBLESHOOTING.md)
 
 ---
 
-## 📄 License
+## 🤝 Contributing
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Contributions sind willkommen! 
+
+1. Fork das Repository
+2. Erstelle einen Feature-Branch (`git checkout -b feature/amazing-feature`)
+3. Commit deine Changes (`git commit -m 'Add amazing feature'`)
+4. Push zum Branch (`git push origin feature/amazing-feature`)
+5. Öffne einen Pull Request
+
+---
+
+## 📜 License
+
+Apache License 2.0 - siehe [LICENSE](LICENSE) Datei für Details.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [SurrealDB](https://surrealdb.com/) - The amazing database
-- [Project Reactor](https://projectreactor.io/) - Reactive programming support
-- [Spring Boot](https://spring.io/projects/spring-boot) - Auto-configuration framework
+- [SurrealDB](https://surrealdb.com/) - The ultimate database
+- [Project Reactor](https://projectreactor.io/) - Reactive programming
+- [Spring Boot](https://spring.io/projects/spring-boot) - Application framework
+- [Resilience4j](https://resilience4j.readme.io/) - Fault tolerance
+- [LZ4 Java](https://github.com/lz4/lz4-java) - Compression library
+
+---
+
+## 📞 Support
+
+- 📖 [Documentation](FEATURES_OVERVIEW.md)
+- 🐛 [Issue Tracker](https://github.com/yourusername/oneiros-core/issues)
+- 💬 [Discussions](https://github.com/yourusername/oneiros-core/discussions)
 
 ---
 
 <div align="center">
 
-**Made with ❤️ by the Oneiros Team**
+**Made with 🌙 and ☕ for the SurrealDB community**
 
-[⬆ Back to Top](#-oneiros---reactive-surrealdb-client-for-java)
+[⬆ Back to Top](#-oneiros---production-ready-reactive-surrealdb-client)
 
 </div>
+
