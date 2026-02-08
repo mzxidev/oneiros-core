@@ -1,6 +1,7 @@
 package io.oneiros.core;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.oneiros.annotation.OneirosEncrypted;
@@ -9,6 +10,7 @@ import io.oneiros.annotation.OneirosID;
 import io.oneiros.client.OneirosClient;
 import io.oneiros.config.OneirosProperties;
 import io.oneiros.security.CryptoService;
+import io.oneiros.security.EncryptionType;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -112,9 +114,19 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
             return idVal.toString();
         }).flatMap(id -> {
             try {
-                String jsonContent = mapper.writeValueAsString(entity);
+                // Serialize entity to JSON
+                String fullJson = mapper.writeValueAsString(entity);
 
-                // --- HIER IST DER FIX: UPSERT statt UPDATE ---
+                // FIX #1: Remove "id" field from JSON to avoid conflict
+                // SurrealDB expects the ID not in CONTENT when it's already in the statement
+                ObjectNode jsonNode = (ObjectNode) mapper.readTree(fullJson);
+                jsonNode.remove("id");
+                String jsonContent = jsonNode.toString();
+
+                // FIX #2: Convert ISO-8601 datetime strings to SurrealDB d"..." literals
+                // This is necessary because writeRawValue doesn't survive the readTree/toString roundtrip
+                jsonContent = convertDatetimesToSurrealFormat(jsonContent);
+
                 // "UPSERT user:123 CONTENT { ... } RETURN AFTER"
                 String sql = "UPSERT " + id + " CONTENT " + jsonContent + " RETURN AFTER";
 
@@ -226,18 +238,35 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
 
     /**
      * Scannt alle Felder. Wenn @OneirosEncrypted gefunden wird -> Encrypt oder Decrypt.
+     * Unterstützt verschiedene Algorithmen: AES_GCM, ARGON2, BCRYPT, SCRYPT, SHA256, SHA512.
      */
     private void processEncryption(T entity, boolean encrypt) {
         if (entity == null) return;
 
         for (Field field : entityType.getDeclaredFields()) {
             if (field.isAnnotationPresent(OneirosEncrypted.class)) {
+                OneirosEncrypted annotation = field.getAnnotation(OneirosEncrypted.class);
+                EncryptionType type = annotation.type();
+                int strength = annotation.strength();
+
                 field.setAccessible(true);
                 try {
                     Object value = field.get(entity);
                     if (value instanceof String strValue) {
-                        String processed = encrypt ? crypto.encrypt(strValue) : crypto.decrypt(strValue);
-                        field.set(entity, processed);
+                        if (encrypt) {
+                            // Encrypt/Hash the value
+                            String processed = crypto.encrypt(strValue, type, strength);
+                            field.set(entity, processed);
+                        } else {
+                            // Only decrypt for AES_GCM (reversible encryption)
+                            // One-way hashes (ARGON2, BCRYPT, SCRYPT, SHA) cannot be decrypted
+                            if (type == EncryptionType.AES_GCM) {
+                                String processed = crypto.decrypt(strValue, type);
+                                field.set(entity, processed);
+                            }
+                            // For password hashes, leave the hash as-is
+                            // Use CryptoService.verify() to check passwords
+                        }
                     }
                     // Info: Aktuell unterstützen wir nur String Encryption.
                     // Für Integer/andere müsste man sie erst zu String konvertieren.
@@ -246,5 +275,46 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
                 }
             }
         }
+    }
+
+    /**
+     * Converts ISO-8601 datetime strings to SurrealDB datetime literals.
+     *
+     * <p>Example: "2024-01-01T00:00:00Z" becomes d"2024-01-01T00:00:00Z"
+     *
+     * <p>This is necessary because Jackson's writeRawValue() doesn't survive
+     * the readTree/toString roundtrip that we use to remove the id field.
+     *
+     * <p>Matches patterns like:
+     * <ul>
+     *   <li>"2024-01-01T00:00:00Z"</li>
+     *   <li>"2024-01-01T00:00:00.123Z"</li>
+     *   <li>"2024-01-01T00:00:00.123456789Z"</li>
+     * </ul>
+     *
+     * @param json The JSON string with ISO-8601 datetime strings
+     * @return The JSON string with SurrealDB datetime literals
+     */
+    private String convertDatetimesToSurrealFormat(String json) {
+        // Regex to match ISO-8601 datetime strings in JSON
+        // Pattern: "YYYY-MM-DDTHH:MM:SS" with optional fractional seconds and timezone
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+            "\"(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})?)\""
+        );
+
+        java.util.regex.Matcher matcher = pattern.matcher(json);
+        StringBuilder sb = new StringBuilder();
+
+        while (matcher.find()) {
+            String datetime = matcher.group(1);
+            // Truncate nanoseconds to seconds for SurrealDB compatibility
+            // Remove fractional seconds if present (everything after . and before Z or +/-)
+            String truncated = datetime.replaceAll("\\.\\d+(?=Z|[+-]|$)", "");
+            // Replace with SurrealDB datetime literal
+            matcher.appendReplacement(sb, "d\"" + truncated + "\"");
+        }
+        matcher.appendTail(sb);
+
+        return sb.toString();
     }
 }

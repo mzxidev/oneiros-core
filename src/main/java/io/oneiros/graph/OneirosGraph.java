@@ -3,6 +3,7 @@ package io.oneiros.graph;
 import io.oneiros.annotation.OneirosEncrypted;
 import io.oneiros.client.OneirosClient;
 import io.oneiros.security.CryptoService;
+import io.oneiros.security.EncryptionType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -284,15 +285,22 @@ public class OneirosGraph {
         try {
             for (Field field : entity.getClass().getDeclaredFields()) {
                 if (field.isAnnotationPresent(OneirosEncrypted.class)) {
+                    OneirosEncrypted annotation = field.getAnnotation(OneirosEncrypted.class);
+                    EncryptionType type = annotation.type();
+                    int strength = annotation.strength();
+
                     field.setAccessible(true);
                     Object value = field.get(entity);
 
-                    if (value instanceof String) {
-                        String stringValue = (String) value;
+                    if (value instanceof String stringValue) {
                         if (encrypt) {
-                            field.set(entity, crypto.encrypt(stringValue));
+                            field.set(entity, crypto.encrypt(stringValue, type, strength));
                         } else {
-                            field.set(entity, crypto.decrypt(stringValue));
+                            // Only decrypt for AES_GCM (reversible encryption)
+                            if (type == EncryptionType.AES_GCM) {
+                                field.set(entity, crypto.decrypt(stringValue, type));
+                            }
+                            // Password hashes cannot be decrypted
                         }
                     }
                 }

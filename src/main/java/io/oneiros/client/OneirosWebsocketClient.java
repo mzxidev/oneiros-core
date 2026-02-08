@@ -5,42 +5,66 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.CollectionType;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.oneiros.client.rpc.RpcRequest;
 import io.oneiros.client.rpc.RpcResponse;
 import io.oneiros.config.OneirosProperties;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.reactive.socket.WebSocketMessage;
-import org.springframework.web.reactive.socket.WebSocketSession;
-import org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient;
+import io.oneiros.core.OneirosConfig;
+import io.oneiros.transaction.OneirosTransaction;
+import io.oneiros.transaction.OneirosTransactionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.http.client.WebsocketClientSpec;
+import reactor.netty.http.websocket.WebsocketInbound;
+import reactor.netty.http.websocket.WebsocketOutbound;
 
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
- * Reactive WebSocket client implementing the full SurrealDB RPC protocol.
- * Provides non-blocking access to all SurrealDB operations including:
- * - Connection management (signin, use, reset)
- * - CRUD operations (select, create, update, delete, etc.)
- * - Graph relations (relate, insert_relation)
- * - Real-time queries (live, kill)
- * - Session management (let, unset, authenticate)
+ * Framework-agnostic reactive WebSocket client implementing the full SurrealDB RPC protocol.
+ * Uses Reactor Netty directly (no Spring dependencies).
+ *
+ * <p>Provides non-blocking access to all SurrealDB operations including:
+ * <ul>
+ *   <li>Connection management (signin, use, reset)</li>
+ *   <li>CRUD operations (select, create, update, delete, etc.)</li>
+ *   <li>Graph relations (relate, insert_relation)</li>
+ *   <li>Real-time queries (live, kill)</li>
+ *   <li>Session management (let, unset, authenticate)</li>
+ * </ul>
+ *
+ * <p>Works with both {@link OneirosConfig} (framework-agnostic) and
+ * {@link OneirosProperties} (Spring Boot).
  */
-@Slf4j
 public class OneirosWebsocketClient implements OneirosClient {
 
-    private final OneirosProperties properties;
+    private static final Logger log = LoggerFactory.getLogger(OneirosWebsocketClient.class);
+
+    // Configuration - supports both types
+    private final String url;
+    private final String namespace;
+    private final String database;
+    private final String username;
+    private final String password;
+
     private final ObjectMapper mapper;
-    private final ReactorNettyWebSocketClient client;
     private final CircuitBreaker circuitBreaker;
 
-    // Die aktive Session wird über einen Sink bereitgestellt
-    private final Sinks.Many<WebSocketSession> sessionSink = Sinks.many().replay().latest();
+    // Transaction support
+    private final OneirosTransactionManager transactionManager;
+
+    // The send sink for outgoing messages
+    private final Sinks.Many<String> sendSink = Sinks.many().unicast().onBackpressureBuffer();
     private volatile boolean isConnecting = false;
     private volatile boolean isConnected = false;
 
@@ -53,11 +77,32 @@ public class OneirosWebsocketClient implements OneirosClient {
     // Signal for when connection initialization is complete (reset for each connection attempt)
     private volatile Sinks.One<Void> initCompleteSink = Sinks.one();
 
-    public OneirosWebsocketClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker circuitBreaker) {
-        this.properties = properties;
+    /**
+     * Creates a client from framework-agnostic OneirosConfig.
+     */
+    public OneirosWebsocketClient(OneirosConfig config, ObjectMapper mapper, CircuitBreaker circuitBreaker) {
+        this.url = config.getUrl();
+        this.namespace = config.getNamespace();
+        this.database = config.getDatabase();
+        this.username = config.getUsername();
+        this.password = config.getPassword();
         this.mapper = mapper;
         this.circuitBreaker = circuitBreaker;
-        this.client = new org.springframework.web.reactive.socket.client.ReactorNettyWebSocketClient();
+        this.transactionManager = new OneirosTransactionManager(this);
+    }
+
+    /**
+     * Creates a client from Spring OneirosProperties (backward compatibility).
+     */
+    public OneirosWebsocketClient(OneirosProperties properties, ObjectMapper mapper, CircuitBreaker circuitBreaker) {
+        this.url = properties.getUrl();
+        this.namespace = properties.getNamespace();
+        this.database = properties.getDatabase();
+        this.username = properties.getUsername();
+        this.password = properties.getPassword();
+        this.mapper = mapper;
+        this.circuitBreaker = circuitBreaker;
+        this.transactionManager = new OneirosTransactionManager(this);
     }
 
     @Override
@@ -80,95 +125,105 @@ public class OneirosWebsocketClient implements OneirosClient {
         isConnecting = true;
         // Create a fresh sink for this connection attempt
         initCompleteSink = Sinks.one();
-        URI uri = URI.create(properties.getUrl());
+        URI uri = URI.create(this.url);
 
-        org.springframework.http.HttpHeaders plainHeaders = new org.springframework.http.HttpHeaders();
+        // Use Reactor Netty directly (framework-agnostic)
+        HttpClient httpClient = HttpClient.create();
 
         // Start the WebSocket connection in the background
-        // The execute() returns when the session handler's Mono completes
-        this.client.execute(uri, plainHeaders, session -> {
-                    log.info("🌐 Oneiros connected to SurrealDB at {}", uri);
-
-                    // Emit session immediately so RPC calls can use it
-                    sessionSink.tryEmitNext(session);
-
-                    // Mark as connected BEFORE running init, so RPC calls work
-                    isConnected = true;
-                    isConnecting = false;
-
-                    // The receive handler processes incoming messages
-                    // It runs for the lifetime of the WebSocket connection
-                    Mono<Void> receiveHandler = session.receive()
-                            .map(WebSocketMessage::getPayloadAsText)
-                            .doOnNext(this::handleIncomingMessage)
-                            .doOnError(err -> log.error("💥 Receive error: {}", err.getMessage()))
-                            .doOnComplete(() -> {
-                                log.debug("WebSocket receive completed");
-                                isConnected = false;
-                            })
-                            .then();
-
-                    // Authentication and namespace selection
-                    Mono<Void> init = rpc("signin", Map.of("user", properties.getUsername(), "pass", properties.getPassword()))
-                            .doOnSuccess(response -> log.debug("✅ Signin response received"))
-                            .doOnError(err -> log.error("❌ Signin failed: {}", err.getMessage()))
-                            .flatMap(signinResp -> {
-                                if (properties.getNamespace() != null && properties.getDatabase() != null) {
-                                    return rpc("use", properties.getNamespace(), properties.getDatabase())
-                                            .doOnSuccess(response -> log.debug("✅ Use response received"))
-                                            .doOnError(err -> log.error("❌ Use failed: {}", err.getMessage()));
-                                } else {
-                                    return Mono.just(signinResp);
-                                }
-                            })
-                            .then()
-                            .timeout(java.time.Duration.ofSeconds(10))
-                            .doOnSuccess(v -> {
-                                log.debug("✅ Connection initialization complete");
-                                initCompleteSink.tryEmitValue(null);
-                            })
-                            .doOnError(err -> {
-                                log.error("💥 Init failed: {}", err.getMessage(), err);
-                                isConnecting = false;
-                                isConnected = false;
-                                initCompleteSink.tryEmitError(err);
-                            });
-
-                    // CRITICAL: receiveHandler and init MUST run in PARALLEL
-                    // - receiveHandler processes incoming WebSocket messages (including RPC responses)
-                    // - init sends RPC requests (signin, use) and waits for responses
-                    // If they run sequentially, we get a deadlock:
-                    //   init waits for response -> response can't arrive because receiveHandler isn't running
-                    //
-                    // Using Flux.merge ensures both start immediately and run concurrently.
-                    // The returned Mono completes when BOTH complete (receiveHandler runs forever,
-                    // so the WebSocket stays open)
-                    return Flux.merge(
-                            receiveHandler.flux(),
-                            init.flux()
-                    ).then();
-                })
-                .retry(3)
-                .doOnError(e -> {
-                    log.error("💥 Connection fatal error: {}", e.getMessage());
-                    isConnecting = false;
+        httpClient.websocket(WebsocketClientSpec.builder().build())
+            .uri(uri)
+            .handle((inbound, outbound) -> handleWebSocket(inbound, outbound, uri))
+            .retry(3)
+            .doOnError(e -> {
+                log.error("💥 Connection fatal error: {}", e.getMessage());
+                isConnecting = false;
+                isConnected = false;
+                initCompleteSink.tryEmitError(e);
+            })
+            .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+            .subscribe(
+                v -> {},
+                err -> log.error("❌ WebSocket connection error: {}", err.getMessage()),
+                () -> {
+                    log.debug("📡 WebSocket connection closed");
                     isConnected = false;
-                    initCompleteSink.tryEmitError(e);
-                })
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-                .subscribe(
-                        v -> {},
-                        err -> log.error("❌ WebSocket connection error: {}", err.getMessage()),
-                        () -> {
-                            log.debug("📡 WebSocket connection closed");
-                            isConnected = false;
-                        }
-                );
+                }
+            );
 
         // Wait for init to complete (signaled via initCompleteSink)
         return initCompleteSink.asMono()
                 .timeout(java.time.Duration.ofSeconds(15))
                 .doOnError(err -> log.error("⏱️ Connection timeout: {}", err.getMessage()));
+    }
+
+    /**
+     * Handles the WebSocket connection using Reactor Netty native API.
+     */
+    private Mono<Void> handleWebSocket(WebsocketInbound inbound, WebsocketOutbound outbound, URI uri) {
+        log.info("🌐 Oneiros connected to SurrealDB at {}", uri);
+
+        // Mark as connected BEFORE running init, so RPC calls work
+        isConnected = true;
+        isConnecting = false;
+
+        // The receive handler processes incoming messages
+        Mono<Void> receiveHandler = inbound.receive()
+            .asString()
+            .doOnNext(this::handleIncomingMessage)
+            .doOnError(err -> log.error("💥 Receive error: {}", err.getMessage()))
+            .doOnComplete(() -> {
+                log.debug("WebSocket receive completed");
+                isConnected = false;
+            })
+            .then();
+
+        // The send handler processes outgoing messages from sendSink
+        Mono<Void> sendHandler = outbound
+            .sendString(sendSink.asFlux())
+            .then();
+
+        // Authentication and namespace selection
+        Mono<Void> init = rpc("signin", Map.of("user", this.username, "pass", this.password))
+            .doOnSuccess(response -> log.debug("✅ Signin response received"))
+            .doOnError(err -> log.error("❌ Signin failed: {}", err.getMessage()))
+            .flatMap(signinResp -> {
+                if (this.namespace != null && this.database != null) {
+                    return rpc("use", this.namespace, this.database)
+                        .doOnSuccess(response -> log.debug("✅ Use response received"))
+                        .doOnError(err -> log.error("❌ Use failed: {}", err.getMessage()));
+                } else {
+                    return Mono.just(signinResp);
+                }
+            })
+            .then()
+            .timeout(java.time.Duration.ofSeconds(10))
+            .doOnSuccess(v -> {
+                log.debug("✅ Connection initialization complete");
+                initCompleteSink.tryEmitValue(null);
+            })
+            .doOnError(err -> {
+                log.error("💥 Init failed: {}", err.getMessage(), err);
+                isConnecting = false;
+                isConnected = false;
+                initCompleteSink.tryEmitError(err);
+            });
+
+        // CRITICAL: receiveHandler, sendHandler and init MUST run in PARALLEL
+        // - receiveHandler processes incoming WebSocket messages (including RPC responses)
+        // - sendHandler sends outgoing messages from the sink
+        // - init sends RPC requests (signin, use) and waits for responses
+        // If they run sequentially, we get a deadlock:
+        //   init waits for response -> response can't arrive because receiveHandler isn't running
+        //
+        // Using Flux.merge ensures all three start immediately and run concurrently.
+        // The returned Mono completes when ALL complete (receiveHandler runs forever,
+        // so the WebSocket stays open)
+        return Flux.merge(
+            receiveHandler.flux(),
+            sendHandler.flux(),
+            init.flux()
+        ).then();
     }
 
     private void handleIncomingMessage(String json) {
@@ -650,46 +705,75 @@ public class OneirosWebsocketClient implements OneirosClient {
         pendingRequests.clear();
         liveQuerySinks.clear();
         isConnected = false;
+        sendSink.tryEmitComplete();
         log.info("🔌 Disconnected from SurrealDB");
         return Mono.empty();
+    }
+
+    // ============================================================
+    // TRANSACTIONS
+    // ============================================================
+
+    @Override
+    public <T> Mono<T> transaction(Function<OneirosTransaction, Mono<T>> transactionBlock) {
+        return transactionManager.execute(transactionBlock)
+            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
+    }
+
+    @Override
+    public <T> Flux<T> transactionMany(Function<OneirosTransaction, Flux<T>> transactionBlock) {
+        return transactionManager.executeMany(transactionBlock)
+            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
     }
 
 
     // --- Private Helpers ---
 
     private Mono<RpcResponse> rpc(String method, Object... params) {
-        return getOrWaitForSession().flatMap(activeSession -> rpcWithSession(activeSession, method, params));
+        return waitForConnection().then(Mono.defer(() -> sendRpc(method, params)));
     }
 
-    private Mono<WebSocketSession> getOrWaitForSession() {
-        // If already connected or connecting, wait for session
-        if (isConnected || isConnecting) {
-            return sessionSink.asFlux().next()
-                    .timeout(java.time.Duration.ofSeconds(20))
-                    .doOnError(err -> log.error("⏱️ Timeout waiting for session: {}", err.getMessage()));
+    private Mono<Void> waitForConnection() {
+        // If already connected, return immediately
+        if (isConnected) {
+            return Mono.empty();
         }
 
-        // Not connected -> start connection and wait for session
-        return connect()
-                .then(sessionSink.asFlux().next())
+        // If connecting, wait for init to complete
+        if (isConnecting) {
+            return initCompleteSink.asMono()
                 .timeout(java.time.Duration.ofSeconds(20))
-                .doOnError(err -> log.error("⏱️ Timeout during connection: {}", err.getMessage()));
+                .doOnError(err -> log.error("⏱️ Timeout waiting for connection: {}", err.getMessage()));
+        }
+
+        // Not connected -> start connection
+        return connect()
+            .timeout(java.time.Duration.ofSeconds(20))
+            .doOnError(err -> log.error("⏱️ Timeout during connection: {}", err.getMessage()));
     }
 
-    private Mono<RpcResponse> rpcWithSession(WebSocketSession session, String method, Object... params) {
+    private Mono<RpcResponse> sendRpc(String method, Object... params) {
         String id = UUID.randomUUID().toString();
         RpcRequest request = new RpcRequest(id, method, List.of(params));
 
-        Sinks.One<RpcResponse> sink = Sinks.one();
-        pendingRequests.put(id, sink);
+        Sinks.One<RpcResponse> responseSink = Sinks.one();
+        pendingRequests.put(id, responseSink);
 
         try {
             String json = mapper.writeValueAsString(request);
             log.debug("📤 RPC [{}]: {}", method, json);
 
-            return session.send(Mono.just(session.textMessage(json)))
-                    .then(sink.asMono())
-                    .doOnError(err -> pendingRequests.remove(id));
+            // Send the message through the send sink (will be picked up by sendHandler)
+            Sinks.EmitResult result = sendSink.tryEmitNext(json);
+            if (result.isFailure()) {
+                pendingRequests.remove(id);
+                return Mono.error(new RuntimeException("Failed to send RPC message: " + result));
+            }
+
+            // Wait for the response
+            return responseSink.asMono()
+                .timeout(java.time.Duration.ofSeconds(30))
+                .doOnError(err -> pendingRequests.remove(id));
         } catch (Exception e) {
             pendingRequests.remove(id);
             return Mono.error(e);

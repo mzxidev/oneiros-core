@@ -6,13 +6,14 @@ plugins {
 }
 
 group = 'io.oneiros'
-version = '0.2.1'
+version = '0.3.0'
 
 java {
     sourceCompatibility = '21'
 }
 
 repositories {
+    mavenLocal()
     mavenCentral() // <--- MUSS DA SEIN!
     maven { url 'https://repo.spring.io/milestone' }
 }
@@ -22,6 +23,7 @@ dependencies {
     api 'org.springframework.boot:spring-boot-starter-actuator:4.1.0-M1'
 
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.21.0'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.21.0'
     implementation 'org.springframework:spring-websocket:7.0.3'
     implementation 'io.github.resilience4j:resilience4j-reactor:2.3.0'
 
@@ -29,12 +31,27 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-aop:4.0.0-M1'
     implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
 
+    // Security - Password hashing (Argon2, BCrypt, SCrypt)
+    implementation 'org.springframework.security:spring-security-crypto:6.4.5'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.79' // Required for Argon2 and SCrypt
+
+    // LZ4 Compression for backup functionality
+    implementation 'org.lz4:lz4-java:1.8.0'
+
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     testCompileOnly 'org.projectlombok:lombok:1.18.30'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 
+    // Source: https://mvnrepository.com/artifact/io.github.classgraph/classgraph
+    implementation 'io.github.classgraph:classgraph:4.8.184'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:4.1.0-M1'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.11.4'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core:3.27.7'
     testImplementation 'io.projectreactor:reactor-test:3.8.2'
     testImplementation 'org.mockito:mockito-core:5.15.2'
@@ -56,7 +73,7 @@ publishing {
             from components.java
             groupId = 'io.oneiros'
             artifactId = 'oneiros-core'
-            version = '0.2.1'
+            version = '0.3.0'
         }
     }
 }

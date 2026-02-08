@@ -37,6 +37,31 @@ oneiros:
     enabled: true          # Enable auto-migration
     base-package: io.oneiros  # Base package to scan for @OneirosEntity classes
     dry-run: false         # If true, only logs SQL without executing
+    overwrite: false       # If true, use OVERWRITE instead of IF NOT EXISTS
+                           # Set to true if you need to update existing schema
+                           # (e.g., fix incorrect assertions like .length())
+
+  # Circuit Breaker Configuration (Database Protection)
+  circuit-breaker:
+    enabled: true                       # Enable/disable circuit breaker
+    failure-rate-threshold: 50          # Open circuit when 50% of calls fail
+    wait-duration-in-open-state: 5      # Wait 5 seconds before transitioning to half-open
+    permitted-calls-in-half-open-state: 3  # Test with 3 calls in half-open state
+    sliding-window-size: 10             # Evaluate last 10 calls
+    minimum-number-of-calls: 5          # Need at least 5 calls to calculate failure rate
+    slow-call-duration-threshold: 2000  # Calls > 2s are considered slow (milliseconds)
+    slow-call-rate-threshold: 100       # Slow call threshold % (100 = disabled)
+
+  # Backup & Restore Configuration (LZ4 Compression)
+  backup:
+    enabled: false                      # Enable/disable backup functionality
+    directory: ./backups                # Directory to store backup files
+    schedule:
+      enabled: false                    # Enable automatic scheduled backups
+      cron: "0 0 2 * * *"              # Cron expression (default: daily at 2 AM)
+    retention:
+      max-backups: 7                    # Maximum number of backups to keep
+      max-age-days: 30                  # Delete backups older than X days
 
 # =============================================================================
 # Spring WebFlux Configuration (optional)
@@ -109,6 +134,15 @@ oneiros:
     max-wait-seconds: 30
     health-check-interval: 30
     auto-reconnect: true
+  backup:
+    enabled: true        # Enable backups in production
+    directory: /var/backups/oneiros
+    schedule:
+      enabled: true
+      cron: "0 0 2 * * *"  # Daily at 2 AM
+    retention:
+      max-backups: 14    # Keep 2 weeks of backups
+      max-age-days: 30   # Delete backups older than 30 days
 
 ---
 # Testing Profile (no auto-migration)

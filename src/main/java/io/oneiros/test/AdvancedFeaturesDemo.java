@@ -33,7 +33,7 @@ public class AdvancedFeaturesDemo {
      */
     @Data
     @OneirosEntity("users")
-    @OneirosTable(isStrict = true, comment = "User accounts with versioning")
+    @OneirosTable(schemafull = true, comment = "User accounts with versioning")
     @OneirosVersioned(historyTable = "user_history", maxVersions = 10)
     public static class User {
         @OneirosID
@@ -44,7 +44,7 @@ public class AdvancedFeaturesDemo {
             unique = true,
             index = true,
             indexName = "idx_user_email",
-            assertion = "$value.length() > 5",
+            assertion = "string::len($value) > 5",
             comment = "User email address"
         )
         private String email;
@@ -75,7 +75,7 @@ public class AdvancedFeaturesDemo {
      */
     @Data
     @OneirosEntity("products")
-    @OneirosTable(isStrict = false, changeFeed = "3d")
+    @OneirosTable(schemafull = false, changeFeed = "3d")
     public static class Product {
         @OneirosID
         private String id;
@@ -468,7 +468,7 @@ public class AdvancedFeaturesDemo {
         log.info("     COMMENT 'User accounts with versioning';");
         log.info("");
         log.info("   DEFINE FIELD email ON users TYPE string");
-        log.info("     ASSERT $value.length() > 5");
+        log.info("     ASSERT string::len($value) > 5");
         log.info("     COMMENT 'User email address';");
         log.info("");
         log.info("   DEFINE INDEX idx_user_email ON users FIELDS email UNIQUE;");
@@ -541,7 +541,7 @@ public class AdvancedFeaturesDemo {
         log.info("5️⃣ FIELD VALIDATION - Assertions and constraints:");
         log.info("");
         log.info("   DEFINE FIELD email ON users TYPE string");
-        log.info("     ASSERT $value.length() > 5;");
+        log.info("     ASSERT string::len($value) > 5;");
         log.info("");
         log.info("   ✅ Valid:   'alice@example.com' (passes assertion)");
         log.info("   ❌ Invalid: 'a@b' (fails assertion)");
