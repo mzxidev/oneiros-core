@@ -1,5 +1,11 @@
 package io.oneiros.migration;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import io.oneiros.migration.serializer.InstantToSurrealDatetimeSerializer;
+
 import java.time.Instant;
 
 /**
@@ -18,14 +24,26 @@ import java.time.Instant;
  * DEFINE INDEX idx_version ON oneiros_schema_history FIELDS version UNIQUE;
  * </pre>
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class SchemaHistoryEntry {
 
+    @JsonIgnore
     private String id;
+
     private int version;
+
     private String description;
+
+    @JsonProperty("installed_on")
+    @JsonSerialize(using = InstantToSurrealDatetimeSerializer.class)
     private Instant installedOn;
+
+    @JsonProperty("execution_time_ms")
     private long executionTimeMs;
+
     private boolean success;
+
+    @JsonProperty("error_message")
     private String errorMessage;
 
     public SchemaHistoryEntry() {

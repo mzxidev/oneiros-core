@@ -90,8 +90,8 @@ public class OneirosSecurityHandler {
         }
 
         try {
-            // Process all fields with circular reference protection
-            Set<Object> visited = new HashSet<>();
+            // Process all fields with circular reference protection (identity-based)
+            Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
             processFields(entity, true, visited);
 
             log.debug("🔐 Encrypted entity: {}", entity.getClass().getSimpleName());
@@ -119,8 +119,8 @@ public class OneirosSecurityHandler {
         }
 
         try {
-            // Process all fields with circular reference protection
-            Set<Object> visited = new HashSet<>();
+            // Process all fields with circular reference protection (identity-based)
+            Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
             processFields(entity, false, visited);
 
             log.debug("🔓 Decrypted entity: {}", entity.getClass().getSimpleName());
@@ -157,8 +157,10 @@ public class OneirosSecurityHandler {
             return;
         }
 
-        // Skip Java internal classes (java.*, javax.*) BEFORE checking visited
-        if (clazz.getName().startsWith("java.") || clazz.getName().startsWith("javax.")) {
+        // Skip Java internal classes (java.*, javax.*, jdk.*) BEFORE checking visited
+        if (clazz.getName().startsWith("java.") ||
+            clazz.getName().startsWith("javax.") ||
+            clazz.getName().startsWith("jdk.")) {
             return;
         }
 
@@ -167,10 +169,21 @@ public class OneirosSecurityHandler {
             return;
         }
 
+        // Skip arrays
+        if (clazz.isArray()) {
+            return;
+        }
+
         // NOW check if already visited (circular reference protection)
         // Use identity-based comparison to handle properly
         if (!visited.add(entity)) {
             log.trace("🔄 Skipping already visited object: {}", clazz.getSimpleName());
+            return;
+        }
+
+        // Limit recursion depth as additional safety
+        if (visited.size() > 100) {
+            log.warn("⚠️ Recursion depth limit reached ({}), stopping traversal", visited.size());
             return;
         }
 
@@ -186,7 +199,7 @@ public class OneirosSecurityHandler {
                 // Recursively process nested objects
                 try {
                     Object value = field.get(entity);
-                    if (value != null && !isPrimitiveOrWrapper(value.getClass()) && value.getClass() != String.class) {
+                    if (value != null && shouldProcessNested(value)) {
                         processFields(value, encrypt, visited);
                     }
                 } catch (Exception e) {
@@ -195,6 +208,43 @@ public class OneirosSecurityHandler {
                 }
             }
         }
+    }
+
+    /**
+     * Determines if a nested object should be processed recursively.
+     */
+    private boolean shouldProcessNested(Object value) {
+        if (value == null) {
+            return false;
+        }
+        Class<?> valueClass = value.getClass();
+
+        // Skip primitives, wrappers, strings
+        if (isPrimitiveOrWrapper(valueClass) || valueClass == String.class) {
+            return false;
+        }
+
+        // Skip enums
+        if (valueClass.isEnum() || value instanceof Enum<?>) {
+            return false;
+        }
+
+        // Skip collections and arrays
+        if (value instanceof java.util.Collection ||
+            value instanceof java.util.Map ||
+            valueClass.isArray()) {
+            return false;
+        }
+
+        // Skip Java internal classes
+        String className = valueClass.getName();
+        if (className.startsWith("java.") ||
+            className.startsWith("javax.") ||
+            className.startsWith("jdk.")) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
