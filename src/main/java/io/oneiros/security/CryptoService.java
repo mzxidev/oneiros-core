@@ -242,7 +242,19 @@ public class CryptoService {
 
     private String decryptAesGcm(String encryptedText) {
         try {
+            // Validate Base64 before attempting decode (graceful fallback for unencrypted data)
+            if (!isValidBase64(encryptedText)) {
+                log.trace("Skipping decryption - not valid Base64 (likely unencrypted data)");
+                return encryptedText;
+            }
+
             byte[] decoded = Base64.getDecoder().decode(encryptedText);
+
+            // Check minimum length (IV + at least some ciphertext)
+            if (decoded.length <= IV_LENGTH) {
+                log.trace("Skipping decryption - data too short for AES-GCM");
+                return encryptedText;
+            }
 
             byte[] iv = new byte[IV_LENGTH];
             System.arraycopy(decoded, 0, iv, 0, IV_LENGTH);
@@ -262,6 +274,26 @@ public class CryptoService {
             log.error("Failed to decrypt AES-GCM data: {}", e.getMessage());
             return encryptedText;
         }
+    }
+
+    /**
+     * Checks if a string is valid Base64 encoded.
+     * Used to detect unencrypted data in @OneirosEncrypted fields.
+     *
+     * <p>This enables "write-side-only encryption" scenarios where some data
+     * (like system messages) are deliberately stored unencrypted, but use
+     * the same entity model with @OneirosEncrypted annotations.
+     *
+     * @param str the string to check
+     * @return true if the string is valid Base64
+     */
+    private boolean isValidBase64(String str) {
+        if (str == null || str.isEmpty()) {
+            return false;
+        }
+        // Base64 only allows: A-Z, a-z, 0-9, +, /, =
+        // Also check minimum length for AES-GCM (IV + at least some ciphertext)
+        return str.matches("^[A-Za-z0-9+/]+=*$") && str.length() >= 20;
     }
 
     // ==================== Argon2 ====================
