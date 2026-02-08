@@ -1,6 +1,7 @@
 package io.oneiros.migration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.oneiros.annotation.*;
 import io.oneiros.client.OneirosClient;
 import org.slf4j.Logger;
@@ -65,6 +66,7 @@ public class OneirosMigrationEngine {
         this.dryRun = dryRun;
         this.overwrite = overwrite;
         this.objectMapper = new ObjectMapper();
+        this.objectMapper.registerModule(new JavaTimeModule()); // Support for Instant, LocalDateTime, etc.
     }
 
     /**
@@ -276,10 +278,21 @@ public class OneirosMigrationEngine {
      */
     private Mono<Void> recordMigration(SchemaHistoryEntry entry) {
         try {
-            String json = objectMapper.writeValueAsString(entry);
-            String query = String.format("CREATE %s CONTENT %s", HISTORY_TABLE, json);
+            // Use CREATE ... SET instead of CREATE ... CONTENT to avoid datetime serialization issues
+            // SurrealDB's time::now() creates proper datetime values
+            StringBuilder query = new StringBuilder();
+            query.append("CREATE ").append(HISTORY_TABLE).append(" SET ");
+            query.append("version = ").append(entry.getVersion()).append(", ");
+            query.append("description = '").append(entry.getDescription().replace("'", "\\'")).append("', ");
+            query.append("installed_on = time::now(), ");
+            query.append("execution_time_ms = ").append(entry.getExecutionTimeMs()).append(", ");
+            query.append("success = ").append(entry.isSuccess());
 
-            return client.query(query, Object.class)
+            if (entry.getErrorMessage() != null) {
+                query.append(", error_message = '").append(entry.getErrorMessage().replace("'", "\\'")).append("'");
+            }
+
+            return client.query(query.toString(), Object.class)
                 .then()
                 .doOnSuccess(v -> log.debug("📝 Recorded migration history: V{}", entry.getVersion()));
         } catch (Exception e) {
