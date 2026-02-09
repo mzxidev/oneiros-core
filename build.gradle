@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'io.oneiros'
-version = '0.4.4'
+version = '0.4.5'
 
 java {
     sourceCompatibility = '21'
@@ -73,7 +73,7 @@ publishing {
             from components.java
             groupId = 'io.oneiros'
             artifactId = 'oneiros-core'
-            version = '0.4.4'
+            version = '0.4.5'
         }
     }
 }
