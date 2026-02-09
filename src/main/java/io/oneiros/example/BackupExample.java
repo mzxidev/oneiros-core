@@ -26,9 +26,11 @@ public class BackupExample {
 
         try {
             // 2. Create backup manager
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.deactivateDefaultTyping(); // SECURITY: Prevent deserialization attacks
             OneirosBackupManager backupManager = new OneirosBackupManager(
                 oneiros.client(),
-                new ObjectMapper(),
+                mapper,
                 "myns",
                 "mydb"
             );

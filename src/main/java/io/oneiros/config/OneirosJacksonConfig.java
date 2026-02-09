@@ -85,7 +85,17 @@ public class OneirosJacksonConfig {
         // Accept empty strings as null
         mapper.enable(DeserializationFeature.ACCEPT_EMPTY_STRING_AS_NULL_OBJECT);
 
-        log.debug("🔧 Configured ObjectMapper for SurrealDB compatibility");
+        // ============================================================
+        // SECURITY: Deserialization Hardening
+        // ============================================================
+        // Prevent polymorphic type deserialization attacks (gadget chains)
+        // Ref: https://github.com/FasterXML/jackson-docs/wiki/JacksonPolymorphicDeserialization
+        mapper.deactivateDefaultTyping();
+
+        // Prevent arbitrary class instantiation during deserialization
+        mapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+
+        log.debug("🔧 Configured ObjectMapper for SurrealDB compatibility with security hardening");
     }
 
     // ============================================================

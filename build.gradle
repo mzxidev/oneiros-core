@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'io.oneiros'
-version = '0.3.9'
+version = '0.4.4'
 
 java {
     sourceCompatibility = '21'
@@ -29,11 +29,11 @@ dependencies {
 
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.3.0'
     implementation 'org.springframework.boot:spring-boot-starter-aop:4.0.0-M1'
-    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.0' // Updated for performance improvements
 
     // Security - Password hashing (Argon2, BCrypt, SCrypt)
     implementation 'org.springframework.security:spring-security-crypto:6.4.5'
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.79' // Required for Argon2 and SCrypt
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.80' // Updated for security patches
 
     // LZ4 Compression for backup functionality
     implementation 'org.lz4:lz4-java:1.8.0'
@@ -73,7 +73,7 @@ publishing {
             from components.java
             groupId = 'io.oneiros'
             artifactId = 'oneiros-core'
-            version = '0.3.9'
+            version = '0.4.4'
         }
     }
 }

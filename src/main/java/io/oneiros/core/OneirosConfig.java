@@ -62,6 +62,26 @@ public class OneirosConfig {
     private CircuitBreakerConfig circuitBreaker = CircuitBreakerConfig.builder().build();
 
     /**
+     * SECURITY: Override toString() to mask sensitive credentials.
+     */
+    @Override
+    public String toString() {
+        return "OneirosConfig{" +
+            "url='" + url + '\'' +
+            ", namespace='" + namespace + '\'' +
+            ", database='" + database + '\'' +
+            ", username='" + username + '\'' +
+            ", password='***MASKED***'" +
+            ", autoConnect=" + autoConnect +
+            ", security=" + (security != null ? security.toString() : "null") +
+            ", cache=" + (cache != null ? "CacheConfig{enabled=" + cache.enabled + "}" : "null") +
+            ", migration=" + (migration != null ? "MigrationConfig{enabled=" + migration.enabled + "}" : "null") +
+            ", pool=" + (pool != null ? "PoolConfig{enabled=" + pool.enabled + ", size=" + pool.size + "}" : "null") +
+            ", circuitBreaker=" + (circuitBreaker != null ? "CircuitBreakerConfig{enabled=" + circuitBreaker.enabled + "}" : "null") +
+            '}';
+    }
+
+    /**
      * Security configuration for encryption/hashing.
      */
     @Getter
@@ -74,6 +94,14 @@ public class OneirosConfig {
 
         @Builder.Default
         private String key = "";
+
+        @Override
+        public String toString() {
+            return "SecurityConfig{" +
+                "enabled=" + enabled +
+                ", key='" + (key != null && !key.isEmpty() ? "***MASKED***" : "not set") + '\'' +
+                '}';
+        }
     }
 
     /**
@@ -140,6 +168,29 @@ public class OneirosConfig {
 
         @Builder.Default
         private boolean autoReconnect = true;
+
+        // WebSocket Timeouts (DoS Protection)
+        @Builder.Default
+        private long connectionTimeoutMs = 30000;  // 30 seconds
+
+        @Builder.Default
+        private long requestTimeoutMs = 60000;  // 60 seconds (per RPC request)
+
+        @Builder.Default
+        private long idleTimeoutMs = 300000;  // 5 minutes idle before disconnect
+
+        @Builder.Default
+        private int maxPendingRequests = 1000;  // Max queued requests (backpressure)
+
+        // Rate Limiting
+        @Builder.Default
+        private boolean rateLimitEnabled = false;
+
+        @Builder.Default
+        private int rateLimitMaxRequests = 1000;  // requests per interval
+
+        @Builder.Default
+        private long rateLimitIntervalSeconds = 1;  // 1000 req/sec default
     }
 
     /**

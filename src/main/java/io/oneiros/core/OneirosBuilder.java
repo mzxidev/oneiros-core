@@ -601,6 +601,9 @@ public class OneirosBuilder {
         // Ignore unknown properties when deserializing
         mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
+        // SECURITY: Harden deserialization against gadget chain attacks
+        mapper.deactivateDefaultTyping();
+
         return mapper;
     }
 }

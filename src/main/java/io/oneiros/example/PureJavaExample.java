@@ -211,7 +211,12 @@ public class PureJavaExample {
 
         } catch (Exception e) {
             System.err.println("❌ Error: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("Stack trace: " + e.getClass().getName() + " at " +
+                (e.getStackTrace().length > 0 ? e.getStackTrace()[0].toString() : "unknown location"));
+            // SECURITY FIX: Avoid printStackTrace() - use structured logging instead
+            if (e.getCause() != null) {
+                System.err.println("Caused by: " + e.getCause().getMessage());
+            }
         }
     }
 

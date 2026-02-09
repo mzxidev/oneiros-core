@@ -147,35 +147,34 @@ class OneirosSecurityTest {
         // Given: User with plaintext data
         User user = new User(null, "Alice", "plain-api-key", "plain-password");
 
-        // Capture what gets sent to database
-        AtomicReference<Object> sentToDb = new AtomicReference<>();
+        // Capture encrypted values BEFORE they get decrypted again
+        // (since the mock returns the same object, decryptOnRead would modify it back)
+        AtomicReference<String> encryptedApiKey = new AtomicReference<>();
+        AtomicReference<String> encryptedPassword = new AtomicReference<>();
 
         when(mockClient.create(eq("users"), any(), eq(User.class)))
             .thenAnswer(invocation -> {
-                // Capture the data argument (which should be encrypted)
-                sentToDb.set(invocation.getArgument(1));
-
-                // Return encrypted user from "database"
+                // Capture the encrypted values (which should be encrypted at this point)
                 User dbUser = (User) invocation.getArgument(1);
+                encryptedApiKey.set(dbUser.getApiKey());
+                encryptedPassword.set(dbUser.getPassword());
+
+                // Return the user from "database"
                 return Mono.just(dbUser);
             });
 
         // When: Create user through secure client
         User result = secureClient.create("users", user, User.class).block();
 
-        // Then: Database received encrypted data
-        User sentUser = (User) sentToDb.get();
-        assertNotNull(sentUser, "Data should be sent to database");
-        assertNotEquals("plain-api-key", sentUser.getApiKey(), "Database should receive encrypted apiKey");
-        assertFalse(sentUser.getApiKey().contains("plain"), "Encrypted data should not contain plaintext");
-        assertNotEquals("plain-password", sentUser.getPassword(), "Database should receive hashed password");
+        // Then: Database received encrypted data (check captured values)
+        assertNotNull(encryptedApiKey.get(), "Encrypted apiKey should be captured");
+        assertNotEquals("plain-api-key", encryptedApiKey.get(), "Database should receive encrypted apiKey");
+        assertFalse(encryptedApiKey.get().contains("plain"), "Encrypted data should not contain plaintext");
+        assertNotEquals("plain-password", encryptedPassword.get(), "Database should receive hashed password");
 
         // And: User receives decrypted result
         assertNotNull(result, "Result should not be null");
         assertEquals("plain-api-key", result.getApiKey(), "User should see plaintext apiKey");
-
-        // Note: Original user object is now encrypted (in-place modification)
-        assertNotEquals("plain-api-key", user.getApiKey(), "Original is now encrypted");
     }
 
     @Test
@@ -208,12 +207,15 @@ class OneirosSecurityTest {
         // Given: User with updated plaintext data
         User user = new User("user:123", "Updated Name", "new-api-key", "new-password");
 
-        AtomicReference<Object> sentToDb = new AtomicReference<>();
+        // Capture encrypted values BEFORE they get decrypted again
+        AtomicReference<String> encryptedApiKey = new AtomicReference<>();
+        AtomicReference<String> encryptedPassword = new AtomicReference<>();
 
         when(mockClient.update(eq("user:123"), any(), eq(User.class)))
             .thenAnswer(invocation -> {
-                sentToDb.set(invocation.getArgument(1));
                 User dbUser = (User) invocation.getArgument(1);
+                encryptedApiKey.set(dbUser.getApiKey());
+                encryptedPassword.set(dbUser.getPassword());
                 return Flux.just(dbUser);
             });
 
@@ -222,10 +224,9 @@ class OneirosSecurityTest {
             .collectList()
             .block();
 
-        // Then: Database received encrypted data
-        User sentUser = (User) sentToDb.get();
-        assertNotEquals("new-api-key", sentUser.getApiKey(), "Database should receive encrypted apiKey");
-        assertFalse(sentUser.getApiKey().contains("new"), "Encrypted data should not contain plaintext");
+        // Then: Database received encrypted data (check captured values)
+        assertNotEquals("new-api-key", encryptedApiKey.get(), "Database should receive encrypted apiKey");
+        assertFalse(encryptedApiKey.get().contains("new"), "Encrypted data should not contain plaintext");
 
         // And: User receives decrypted result
         assertNotNull(results);
@@ -297,13 +298,15 @@ class OneirosSecurityTest {
         // Step 1: User creates object with plaintext
         User originalUser = new User(null, "Charlie", "my-secret-key", "my-password");
 
-        AtomicReference<Object> sentToDb = new AtomicReference<>();
+        // Capture encrypted values BEFORE decryption happens
+        AtomicReference<String> encryptedApiKey = new AtomicReference<>();
 
         // Mock create: capture what goes to DB, return it
         when(mockClient.create(eq("users"), any(), eq(User.class)))
             .thenAnswer(invocation -> {
                 User dbUser = (User) invocation.getArgument(1);
-                sentToDb.set(dbUser);
+                // Capture encrypted value before it gets decrypted back
+                encryptedApiKey.set(dbUser.getApiKey());
                 dbUser.setId("user:123");
                 return Mono.just(dbUser);
             });
@@ -311,17 +314,20 @@ class OneirosSecurityTest {
         // Step 2: Create through secure client
         User createdUser = secureClient.create("users", originalUser, User.class).block();
 
-        // Verify: Database received encrypted data
-        User dbUser = (User) sentToDb.get();
-        assertFalse(dbUser.getApiKey().contains("secret"), "DB should have encrypted data");
+        // Verify: Database received encrypted data (check captured value)
+        assertFalse(encryptedApiKey.get().contains("secret"), "DB should have encrypted data");
 
         // Verify: User received decrypted data
         assertNotNull(createdUser);
         assertEquals("my-secret-key", createdUser.getApiKey(), "User should see plaintext");
 
-        // Step 3: Mock select to return the encrypted data from DB
+        // Step 3: Mock select to return a fresh encrypted user from DB
+        // We need to create a NEW user object with freshly encrypted values
+        String freshEncryptedApiKey = cryptoService.encrypt("my-secret-key");
+        User dbUserForSelect = new User("user:123", "Charlie", freshEncryptedApiKey, "hashed-password");
+
         when(mockClient.select(eq("users"), eq(User.class)))
-            .thenReturn(Flux.just(dbUser));
+            .thenReturn(Flux.just(dbUserForSelect));
 
         // Step 4: Select through secure client
         List<User> selected = secureClient.select("users", User.class).collectList().block();

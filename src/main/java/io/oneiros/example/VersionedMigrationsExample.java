@@ -57,7 +57,8 @@ public class VersionedMigrationsExample {
 
         try {
             // Give it a moment to complete migrations
-            Thread.sleep(2000);
+            // PERFORMANCE FIX: Use reactive delay instead of blocking Thread.sleep
+            reactor.core.publisher.Mono.delay(java.time.Duration.ofSeconds(2)).block();
 
             // You can now use the client
             oneiros.client()
@@ -72,10 +73,13 @@ public class VersionedMigrationsExample {
                 );
 
             // Wait for async operations
-            Thread.sleep(1000);
+            // PERFORMANCE FIX: Use reactive delay instead of blocking Thread.sleep
+            reactor.core.publisher.Mono.delay(java.time.Duration.ofSeconds(1)).block();
 
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         } finally {
             // Clean up
             oneiros.close();

@@ -99,8 +99,11 @@ public class OneirosSecurityHandler {
 
         } catch (Exception e) {
             log.error("❌ Failed to encrypt entity: {}", e.getMessage(), e);
-            // Return entity as-is on error
-            return entity;
+            // SECURITY FIX: Throw exception instead of returning unencrypted data
+            throw new EncryptionFailedException(
+                "Failed to encrypt entity " + entity.getClass().getSimpleName() +
+                ". Aborting to prevent data leak.", e
+            );
         }
     }
 
@@ -112,6 +115,7 @@ public class OneirosSecurityHandler {
      * @param entity The entity to decrypt
      * @param <T> The entity type
      * @return The same instance with decrypted fields
+     * @throws EncryptionFailedException if decryption fails critically
      */
     public <T> T decryptOnRead(T entity) {
         if (!enabled || entity == null || cryptoService == null) {
@@ -128,7 +132,9 @@ public class OneirosSecurityHandler {
 
         } catch (Exception e) {
             log.error("❌ Failed to decrypt entity: {}", e.getMessage(), e);
-            // Return entity as-is on error
+            // For decryption, we can return encrypted data with warning
+            // since it's safer than throwing (data is already encrypted in DB)
+            log.warn("⚠️ Returning entity with encrypted fields due to decryption failure");
             return entity;
         }
     }
