@@ -74,8 +74,24 @@ public class CreateStatement<T> implements Statement<T> {
      * @return this statement for chaining
      */
     public CreateStatement<T> set(String field, Object value) {
+        validateFieldName(field);
         this.fields.put(field, value);
         return this;
+    }
+
+    /**
+     * Validates that a field name is safe (prevents SQL injection via field names).
+     */
+    private void validateFieldName(String field) {
+        if (field == null || field.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
+        }
+        // Allow: letters, numbers, underscores, dots (for nested fields)
+        if (!field.matches("^[a-zA-Z_][a-zA-Z0-9_.]*$")) {
+            throw new SecurityException(
+                "Invalid field name (potential SQL injection): " + field
+            );
+        }
     }
 
     /**
@@ -214,11 +230,26 @@ public class CreateStatement<T> implements Statement<T> {
         if (value == null) {
             return "NONE";
         } else if (value instanceof String) {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         } else if (value instanceof Number || value instanceof Boolean) {
             return value.toString();
         } else {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         }
+    }
+
+    /**
+     * Escapes special characters in a string to prevent SQL injection.
+     */
+    private String escapeString(String value) {
+        if (value == null) return "";
+        return value
+            .replace("\\", "\\\\")  // Backslash first!
+            .replace("'", "\\'")    // Single quotes
+            .replace("\"", "\\\"")  // Double quotes
+            .replace("\n", "\\n")   // Newlines
+            .replace("\r", "\\r")   // Carriage returns
+            .replace("\t", "\\t")   // Tabs
+            .replace("\0", "");     // Remove null bytes
     }
 }

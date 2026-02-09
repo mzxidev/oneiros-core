@@ -287,11 +287,26 @@ public class UpsertStatement<T> implements Statement<T> {
         if (value == null) {
             return "NONE";
         } else if (value instanceof String) {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         } else if (value instanceof Number || value instanceof Boolean) {
             return value.toString();
         } else {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         }
+    }
+
+    /**
+     * Escapes special characters in a string to prevent SQL injection.
+     */
+    private String escapeString(String value) {
+        if (value == null) return "";
+        return value
+            .replace("\\", "\\\\")  // Backslash first!
+            .replace("'", "\\'")    // Single quotes
+            .replace("\"", "\\\"")  // Double quotes
+            .replace("\n", "\\n")   // Newlines
+            .replace("\r", "\\r")   // Carriage returns
+            .replace("\t", "\\t")   // Tabs
+            .replace("\0", "");     // Remove null bytes
     }
 }

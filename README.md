@@ -711,21 +711,52 @@ client.query(
 #### Direct SurrealQL
 
 ```java
-import io.oneiros.statement.*;
+import io.oneiros.statement.statements.*;
 
-// Build complex queries
-String sql = Statement.select()
-    .from("users")
-    .where("age > 18")
-    .and("city = 'Berlin'")
-    .orderBy("name ASC")
+// Build type-safe queries with automatic SQL injection protection
+SelectStatement.from(User.class)
+    .where("age", ">", 18)           // Parameterized by default!
+    .and("city", "=", "Berlin")
+    .orderBy("name")
     .limit(10)
-    .build();
+    .execute(client)
+    .subscribe(user -> System.out.println(user.getName()));
 
-client.query(sql, User.class)
-    .subscribe(user -> {
-        System.out.println(user.getName());
-    });
+// UPDATE with parameterized WHERE
+UpdateStatement.table(User.class)
+    .set("verified", true)
+    .where("email", "=", userInput)  // Safe!
+    .execute(client);
+
+// DELETE with parameterized WHERE  
+DeleteStatement.from(User.class)
+    .where("status", "=", "inactive")
+    .and("lastLogin", "<", oneYearAgo)
+    .execute(client);
+```
+
+#### 🔐 SQL Injection Protection (v0.4.5+)
+
+**All WHERE methods are now parameterized by default:**
+
+```java
+// ✅ SAFE: Default API is now parameterized
+SelectStatement.from(User.class)
+    .where("email", "=", userInput)      // Parameterized!
+    .and("status", "=", "active")        // Parameterized!
+    .execute(client);
+
+// ✅ SAFE: Using parameterized query()
+client.query(
+    "SELECT * FROM users WHERE email = $email",
+    Map.of("email", userInput),
+    User.class
+);
+
+// ⚠️ DEPRECATED: Raw string methods (use only for hardcoded values)
+SelectStatement.from(User.class)
+    .whereRaw("status = 'active'")  // Deprecated - works but discouraged
+    .execute(client);
 ```
 
 ---

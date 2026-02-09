@@ -11,24 +11,28 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * UPDATE statement for modifying existing records.
+ * UPDATE statement for modifying existing records with SQL injection protection.
  *
  * <p>Supports:
- * - SET field = value syntax
- * - MERGE partial updates
- * - CONTENT full replacement
- * - WHERE conditions
- * - RETURN clauses
- * - TIMEOUT
+ * <ul>
+ *   <li>SET field = value syntax</li>
+ *   <li>MERGE partial updates</li>
+ *   <li>CONTENT full replacement</li>
+ *   <li>WHERE conditions (parameterized by default)</li>
+ *   <li>RETURN clauses</li>
+ *   <li>TIMEOUT</li>
+ * </ul>
+ *
+ * <p><b>🔐 Security:</b> All WHERE methods use parameterized queries by default.
  *
  * <p><b>Example:</b>
- * <pre>
+ * <pre>{@code
  * UpdateStatement.table(User.class)
  *     .set("name", "Bob")
- *     .where("id = user:123")
+ *     .where("id", "=", "user:123")  // Parameterized!
  *     .returnAfter()
  *     .execute(client);
- * </pre>
+ * }</pre>
  *
  * @param <T> the entity type
  * @since 1.0.0
@@ -79,6 +83,7 @@ public class UpdateStatement<T> implements Statement<T> {
      * @return this statement for chaining
      */
     public UpdateStatement<T> set(String field, Object value) {
+        validateFieldName(field);
         this.fields.put(field, value);
         return this;
     }
@@ -86,12 +91,53 @@ public class UpdateStatement<T> implements Statement<T> {
     /**
      * Set a field using raw expression (e.g. "balance += 100").
      *
-     * @param expression the raw field expression
+     * <p><b>⚠️ SECURITY WARNING:</b> This method is vulnerable to SQL injection
+     * if user input is included in the expression. Only use with hardcoded expressions.
+     *
+     * <p>For increment/decrement operations with user input, use parameterized queries instead:
+     * <pre>{@code
+     * // ✅ SAFE: Hardcoded expression
+     * .setRaw("balance += 100")
+     *
+     * // ❌ UNSAFE: User input in expression
+     * .setRaw("balance += " + userInput)  // SQL Injection risk!
+     *
+     * // ✅ SAFE: Use parameterized query
+     * client.query("UPDATE users SET balance += $amount WHERE id = $id",
+     *     Map.of("amount", userInput, "id", id), User.class);
+     * }</pre>
+     *
+     * @param expression the raw field expression (DO NOT include user input!)
      * @return this statement for chaining
+     * @deprecated Consider using parameterized queries for dynamic values.
      */
+    @Deprecated(since = "0.4.5")
     public UpdateStatement<T> setRaw(String expression) {
+        // Basic validation for obvious injection patterns
+        String lower = expression.toLowerCase();
+        if (lower.contains("'; ") || lower.contains("'--") || lower.contains("' or ") || lower.contains("' and ")) {
+            throw new SecurityException(
+                "Potential SQL injection detected in setRaw(). " +
+                "Do not use user input in raw expressions."
+            );
+        }
         this.fields.put(expression, null); // null = raw expression
         return this;
+    }
+
+    /**
+     * Validates that a field name is safe (prevents SQL injection via field names).
+     */
+    private void validateFieldName(String field) {
+        if (field == null || field.isEmpty()) {
+            throw new IllegalArgumentException("Field name cannot be null or empty");
+        }
+        // Allow: letters, numbers, underscores, dots (for nested fields)
+        if (!field.matches("^[a-zA-Z_][a-zA-Z0-9_.]*$")) {
+            throw new SecurityException(
+                "Invalid field name (potential SQL injection): " + field
+            );
+        }
     }
 
     /**
@@ -116,37 +162,163 @@ public class UpdateStatement<T> implements Statement<T> {
         return this;
     }
 
+    // --- WHERE Clause (Parameterized - Default) ---
+
     /**
-     * Add WHERE condition.
+     * Adds a parameterized WHERE condition (SQL injection protected).
      *
-     * @param condition the condition expression
+     * <p>This is the recommended and default way to add WHERE conditions.
+     *
+     * <p>Example:
+     * <pre>{@code
+     * UpdateStatement.table(User.class)
+     *     .set("active", true)
+     *     .where("email", "=", userInput)
+     *     .execute(client);
+     * }</pre>
+     *
+     * @param field the field name
+     * @param operator the comparison operator (=, !=, >, <, >=, <=, LIKE, IN)
+     * @param value the value (will be parameterized)
      * @return this statement for chaining
      */
+    public UpdateStatement<T> where(String field, String operator, Object value) {
+        whereClause.addSafe(field, operator, value);
+        return this;
+    }
+
+    /**
+     * Adds a parameterized AND condition.
+     *
+     * @param field the field name
+     * @param operator the comparison operator
+     * @param value the value (will be parameterized)
+     * @return this statement for chaining
+     */
+    public UpdateStatement<T> and(String field, String operator, Object value) {
+        whereClause.andSafe(field, operator, value);
+        return this;
+    }
+
+    /**
+     * Adds a parameterized OR condition.
+     *
+     * @param field the field name
+     * @param operator the comparison operator
+     * @param value the value (will be parameterized)
+     * @return this statement for chaining
+     */
+    public UpdateStatement<T> or(String field, String operator, Object value) {
+        whereClause.orSafe(field, operator, value);
+        return this;
+    }
+
+    // --- WHERE Clause (Raw - Deprecated but backward-compatible) ---
+
+    /**
+     * Adds a raw WHERE condition (for backward compatibility).
+     *
+     * <p><b>⚠️ DEPRECATED:</b> Use {@link #where(String, String, Object)} instead.
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #where(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpdateStatement<T> where(String condition) {
         whereClause.add(condition);
         return this;
     }
 
     /**
-     * Add AND condition.
+     * Adds a raw WHERE condition (alias).
      *
-     * @param condition the condition expression
+     * @param condition the raw condition
      * @return this statement for chaining
+     * @deprecated Use parameterized {@link #where(String, String, Object)} instead
      */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> whereRaw(String condition) {
+        whereClause.add(condition);
+        return this;
+    }
+
+    /**
+     * Adds a raw AND condition (for backward compatibility).
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #and(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpdateStatement<T> and(String condition) {
         whereClause.and(condition);
         return this;
     }
 
     /**
-     * Add OR condition.
+     * Adds a raw AND condition (alias).
      *
-     * @param condition the condition expression
+     * @param condition the raw condition
      * @return this statement for chaining
+     * @deprecated Use parameterized {@link #and(String, String, Object)} instead
      */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> andRaw(String condition) {
+        whereClause.and(condition);
+        return this;
+    }
+
+    /**
+     * Adds a raw OR condition (for backward compatibility).
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #or(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpdateStatement<T> or(String condition) {
         whereClause.or(condition);
         return this;
+    }
+
+    /**
+     * Adds a raw OR condition (alias).
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #or(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> orRaw(String condition) {
+        whereClause.or(condition);
+        return this;
+    }
+
+    // --- Legacy Safe Methods (now just aliases) ---
+
+    /**
+     * @deprecated Use {@link #where(String, String, Object)} instead - it's now the default
+     */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> whereSafe(String field, String operator, Object value) {
+        return where(field, operator, value);
+    }
+
+    /**
+     * @deprecated Use {@link #and(String, String, Object)} instead - it's now the default
+     */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> andSafe(String field, String operator, Object value) {
+        return and(field, operator, value);
+    }
+
+    /**
+     * @deprecated Use {@link #or(String, String, Object)} instead - it's now the default
+     */
+    @Deprecated(since = "0.4.5")
+    public UpdateStatement<T> orSafe(String field, String operator, Object value) {
+        return or(field, operator, value);
     }
 
     /**
@@ -267,12 +439,22 @@ public class UpdateStatement<T> implements Statement<T> {
 
     @Override
     public Flux<T> execute(OneirosClient client) {
-        return client.query(toSql(), type);
+        String sql = toSql();
+        // Use parameterized query if WHERE has parameters
+        if (whereClause.hasParameters()) {
+            return client.query(sql, whereClause.getParameters(), type);
+        }
+        return client.query(sql, type);
     }
 
     @Override
     public Mono<T> executeOne(OneirosClient client) {
-        return execute(client).next();
+        String sql = toSql();
+        // Use parameterized query if WHERE has parameters
+        if (whereClause.hasParameters()) {
+            return client.query(sql, whereClause.getParameters(), type).next();
+        }
+        return client.query(sql, type).next();
     }
 
     // --- Helpers ---
@@ -289,11 +471,26 @@ public class UpdateStatement<T> implements Statement<T> {
         if (value == null) {
             return "NONE";
         } else if (value instanceof String) {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         } else if (value instanceof Number || value instanceof Boolean) {
             return value.toString();
         } else {
-            return "'" + value.toString().replace("'", "\\'") + "'";
+            return "'" + escapeString(value.toString()) + "'";
         }
+    }
+
+    /**
+     * Escapes special characters in a string to prevent SQL injection.
+     */
+    private String escapeString(String value) {
+        if (value == null) return "";
+        return value
+            .replace("\\", "\\\\")  // Backslash first!
+            .replace("'", "\\'")    // Single quotes
+            .replace("\"", "\\\"")  // Double quotes
+            .replace("\n", "\\n")   // Newlines
+            .replace("\r", "\\r")   // Carriage returns
+            .replace("\t", "\\t")   // Tabs
+            .replace("\0", "");     // Remove null bytes
     }
 }

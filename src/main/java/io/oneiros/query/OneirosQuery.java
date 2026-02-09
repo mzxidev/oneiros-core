@@ -324,9 +324,28 @@ public class OneirosQuery<T> {
     }
 
     private String formatValue(Object val) {
+        if (val == null) return "NONE";
         if (val instanceof Number) return val.toString();
         if (val instanceof Boolean) return val.toString();
-        return "'" + val.toString().replace("'", "\\'") + "'";
+        // Comprehensive escaping to prevent SQL injection
+        return "'" + escapeString(val.toString()) + "'";
+    }
+
+    /**
+     * Escapes special characters in a string to prevent SQL injection.
+     * @param value the string to escape
+     * @return the escaped string
+     */
+    private String escapeString(String value) {
+        if (value == null) return "";
+        return value
+            .replace("\\", "\\\\")  // Backslash first!
+            .replace("'", "\\'")    // Single quotes
+            .replace("\"", "\\\"")  // Double quotes
+            .replace("\n", "\\n")   // Newlines
+            .replace("\r", "\\r")   // Carriage returns
+            .replace("\t", "\\t")   // Tabs
+            .replace("\0", "");     // Remove null bytes
     }
 
     // ==================================================================================
