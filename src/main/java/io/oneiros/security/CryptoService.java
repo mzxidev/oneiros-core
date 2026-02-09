@@ -13,7 +13,6 @@ import org.springframework.security.crypto.scrypt.SCryptPasswordEncoder;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -33,11 +32,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><strong>SHA256/SHA512</strong> - Simple hashing (not for passwords)</li>
  * </ul>
  *
+ * <p><strong>Key Management:</strong> By default, keys are stored in application memory
+ * using {@link InMemoryKeyProvider}. For high-security environments, you can inject
+ * a custom {@link KeyProvider} for integration with:
+ * <ul>
+ *   <li>AWS KMS, Azure Key Vault, GCP Cloud KMS</li>
+ *   <li>HashiCorp Vault</li>
+ *   <li>Hardware Security Modules (HSM) via PKCS#11</li>
+ * </ul>
+ *
  * <p><strong>Note:</strong> This class uses Spring Security for password encoding
  * but works in non-Spring environments as well. Spring Security Crypto is a
  * standalone library that doesn't require the Spring Framework.
  *
  * @see EncryptionType
+ * @see KeyProvider
  */
 public class CryptoService {
 
@@ -66,7 +75,7 @@ public class CryptoService {
      */
     @Getter
     private final boolean enabled;
-    private final SecretKey secretKey;
+    private final KeyProvider keyProvider;
     private final SecureRandom secureRandom = new SecureRandom();
 
     // Cache for password encoders with different strengths
@@ -103,24 +112,63 @@ public class CryptoService {
             if (keyString == null || keyString.length() < 8) {
                 throw new IllegalArgumentException("❌ Oneiros Security is enabled but Key is too short or missing!");
             }
-            // Hash the user key with SHA-256 to ensure it's exactly 32 bytes (256 bit)
-            this.secretKey = generateKey(keyString);
+            // Use InMemoryKeyProvider by default
+            this.keyProvider = new InMemoryKeyProvider(keyString);
             log.info("🔒 Oneiros Vault initialized (AES-256-GCM)");
         } else {
-            this.secretKey = null;
+            this.keyProvider = null;
             log.info("🔓 Oneiros Encryption disabled");
         }
     }
 
-    private SecretKey generateKey(String key) {
-        try {
-            MessageDigest sha = MessageDigest.getInstance("SHA-256");
-            byte[] keyBytes = sha.digest(key.getBytes(StandardCharsets.UTF_8));
-            return new SecretKeySpec(keyBytes, "AES");
-        } catch (Exception e) {
-            throw new RuntimeException("Crypto Init Error", e);
+    /**
+     * Creates a CryptoService with a custom KeyProvider.
+     *
+     * <p>Use this constructor for integration with external key management systems
+     * like AWS KMS, Azure Key Vault, HashiCorp Vault, or HSMs.
+     *
+     * <h3>Example: AWS KMS Integration</h3>
+     * <pre>{@code
+     * KeyProvider kmsProvider = new AwsKmsKeyProvider(kmsClient, keyArn);
+     * CryptoService crypto = new CryptoService(kmsProvider);
+     * }</pre>
+     *
+     * @param keyProvider the key provider to use
+     * @throws IllegalArgumentException if keyProvider is null
+     * @since 0.4.2
+     */
+    public CryptoService(KeyProvider keyProvider) {
+        if (keyProvider == null) {
+            throw new IllegalArgumentException("KeyProvider cannot be null");
         }
+        this.enabled = true;
+        this.keyProvider = keyProvider;
+        keyProvider.validate(); // Ensure the provider is working
+        log.info("🔒 Oneiros Vault initialized with {} (keyId: {})",
+                keyProvider.getMetadata().map(m -> m.providerType()).orElse("custom provider"),
+                keyProvider.getKeyId().substring(0, Math.min(8, keyProvider.getKeyId().length())) + "...");
     }
+
+    /**
+     * Returns the current key provider.
+     *
+     * @return the key provider, or null if encryption is disabled
+     * @since 0.4.2
+     */
+    public KeyProvider getKeyProvider() {
+        return keyProvider;
+    }
+
+    /**
+     * Returns the current key ID for auditing purposes.
+     *
+     * @return the key ID, or "disabled" if encryption is disabled
+     * @since 0.4.2
+     */
+    public String getKeyId() {
+        return keyProvider != null ? keyProvider.getKeyId() : "disabled";
+    }
+
 
     // ==================== Main API ====================
 
@@ -225,7 +273,7 @@ public class CryptoService {
 
             Cipher cipher = Cipher.getInstance(ALGORITHM);
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
+            cipher.init(Cipher.ENCRYPT_MODE, keyProvider.getSecretKey(), spec);
 
             byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
 
@@ -265,7 +313,7 @@ public class CryptoService {
 
             Cipher cipher = Cipher.getInstance(ALGORITHM);
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
+            cipher.init(Cipher.DECRYPT_MODE, keyProvider.getSecretKey(), spec);
 
             byte[] plainText = cipher.doFinal(cipherText);
             return new String(plainText, StandardCharsets.UTF_8);

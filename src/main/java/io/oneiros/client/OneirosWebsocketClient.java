@@ -63,8 +63,8 @@ public class OneirosWebsocketClient implements OneirosClient {
     // Transaction support
     private final OneirosTransactionManager transactionManager;
 
-    // The send sink for outgoing messages
-    private final Sinks.Many<String> sendSink = Sinks.many().unicast().onBackpressureBuffer();
+    // The send sink for outgoing messages - multicast allows multiple subscribers (for reconnects)
+    private final Sinks.Many<String> sendSink = Sinks.many().multicast().onBackpressureBuffer();
     private volatile boolean isConnecting = false;
     private volatile boolean isConnected = false;
 
@@ -128,10 +128,25 @@ public class OneirosWebsocketClient implements OneirosClient {
         URI uri = URI.create(this.url);
 
         // Use Reactor Netty directly (framework-agnostic)
-        HttpClient httpClient = HttpClient.create();
+        HttpClient httpClient = HttpClient.create()
+                .secure(sslSpec -> {
+                    try {
+                        // Enable TLS/SSL with secure defaults
+                        sslSpec.sslContext(io.netty.handler.ssl.SslContextBuilder.forClient()
+                                .protocols("TLSv1.3", "TLSv1.2")
+                                .build());
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to configure SSL context", e);
+                    }
+                });
+
+        // Configure WebSocket with larger frame size for SurrealDB responses
+        WebsocketClientSpec wsSpec = WebsocketClientSpec.builder()
+                .maxFramePayloadLength(10 * 1024 * 1024) // 10 MB (SurrealDB can send large responses)
+                .build();
 
         // Start the WebSocket connection in the background
-        httpClient.websocket(WebsocketClientSpec.builder().build())
+        httpClient.websocket(wsSpec)
             .uri(uri)
             .handle((inbound, outbound) -> handleWebSocket(inbound, outbound, uri))
             .retry(3)
