@@ -187,30 +187,7 @@ Run security checks with:
 2. **File Operations** - Check path traversal protection
 3. **Error Messages** - Ensure no sensitive data leakage
 4. **Logging** - Verify no passwords/keys in logs
-
-## 🚨 Reporting Security Vulnerabilities
-
-**Please DO NOT file public issues for security vulnerabilities!**
-
-Instead, report securely via:
-- **Email:** security@oneiros.io (PGP key available)
-- **GitHub Security Advisory:** [Create Advisory](https://github.com/your-repo/security/advisories/new)
-
-### What to Include
-
-1. **Description** of the vulnerability
-2. **Steps to reproduce**
-3. **Potential impact** assessment
-4. **Suggested fix** (if known)
-5. **Your contact information**
-
-### Response Timeline
-
-- **Initial Response:** Within 48 hours
-- **Fix Development:** 1-7 days (depending on severity)
-- **Patch Release:** Critical issues patched within 72 hours
-- **Public Disclosure:** After fix is released
-
+   
 ## 🏆 Security Credits
 
 We acknowledge security researchers who responsibly disclose vulnerabilities:
@@ -238,5 +215,5 @@ Oneiros Framework security features support compliance with:
 ---
 
 **Last Updated:** 2026-02-09
-**Security Version:** 0.4.4
+**Security Version:** 0.4.5
 **Security Score:** 10.0/10 ✅
