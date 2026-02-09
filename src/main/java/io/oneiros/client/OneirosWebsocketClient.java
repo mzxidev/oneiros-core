@@ -60,6 +60,10 @@ public class OneirosWebsocketClient implements OneirosClient {
     private final ObjectMapper mapper;
     private final CircuitBreaker circuitBreaker;
 
+    // Timeout configuration (DoS Protection)
+    private final long connectionTimeoutMs;
+    private final long requestTimeoutMs;
+
     // Transaction support
     private final OneirosTransactionManager transactionManager;
 
@@ -88,6 +92,9 @@ public class OneirosWebsocketClient implements OneirosClient {
         this.password = config.getPassword();
         this.mapper = mapper;
         this.circuitBreaker = circuitBreaker;
+        // DoS Protection: Configure timeouts from pool config
+        this.connectionTimeoutMs = config.getPool() != null ? config.getPool().getConnectionTimeoutMs() : 30000;
+        this.requestTimeoutMs = config.getPool() != null ? config.getPool().getRequestTimeoutMs() : 60000;
         this.transactionManager = new OneirosTransactionManager(this);
     }
 
@@ -102,6 +109,9 @@ public class OneirosWebsocketClient implements OneirosClient {
         this.password = properties.getPassword();
         this.mapper = mapper;
         this.circuitBreaker = circuitBreaker;
+        // DoS Protection: Configure timeouts (use defaults for Spring properties)
+        this.connectionTimeoutMs = 30000;
+        this.requestTimeoutMs = 60000;
         this.transactionManager = new OneirosTransactionManager(this);
     }
 
@@ -117,9 +127,9 @@ public class OneirosWebsocketClient implements OneirosClient {
         }
 
         if (isConnecting) {
-            // Already connecting, wait for init to complete
+            // Already connecting, wait for init to complete with configured timeout
             return initCompleteSink.asMono()
-                    .timeout(java.time.Duration.ofSeconds(15));
+                    .timeout(java.time.Duration.ofMillis(connectionTimeoutMs));
         }
 
         isConnecting = true;
@@ -489,6 +499,17 @@ public class OneirosWebsocketClient implements OneirosClient {
 
     @Override
     public <T> Flux<T> select(String thing, Map<String, Object> options, Class<T> resultType) {
+        // Input validation to prevent NoSQL injection
+        try {
+            if (thing.contains(":")) {
+                InputValidator.validateRecordId(thing);
+            } else {
+                InputValidator.validateTableName(thing);
+            }
+        } catch (IllegalArgumentException e) {
+            return Flux.error(e);
+        }
+
         Object[] params = options != null ? new Object[]{thing, options} : new Object[]{thing};
 
         return rpc("select", params)
@@ -517,6 +538,18 @@ public class OneirosWebsocketClient implements OneirosClient {
 
     @Override
     public <T> Mono<T> create(String thing, Object data, Class<T> resultType) {
+        // Input validation
+        try {
+            if (thing.contains(":")) {
+                InputValidator.validateRecordId(thing);
+            } else {
+                InputValidator.validateTableName(thing);
+            }
+            InputValidator.validateData(data);
+        } catch (IllegalArgumentException e) {
+            return Mono.error(e);
+        }
+
         return rpc("create", thing, data)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
                 .map(response -> {
@@ -535,6 +568,14 @@ public class OneirosWebsocketClient implements OneirosClient {
 
     @Override
     public <T> Flux<T> insert(String thing, Object data, Class<T> resultType) {
+        // Input validation
+        try {
+            InputValidator.validateTableName(thing);
+            InputValidator.validateData(data);
+        } catch (IllegalArgumentException e) {
+            return Flux.error(e);
+        }
+
         return rpc("insert", thing, data)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
                 .flatMapMany(response -> {
@@ -551,6 +592,18 @@ public class OneirosWebsocketClient implements OneirosClient {
 
     @Override
     public <T> Flux<T> update(String thing, Object data, Class<T> resultType) {
+        // Input validation
+        try {
+            if (thing.contains(":")) {
+                InputValidator.validateRecordId(thing);
+            } else {
+                InputValidator.validateTableName(thing);
+            }
+            InputValidator.validateData(data);
+        } catch (IllegalArgumentException e) {
+            return Flux.error(e);
+        }
+
         return rpc("update", thing, data)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
                 .flatMapMany(response -> {
@@ -785,10 +838,13 @@ public class OneirosWebsocketClient implements OneirosClient {
                 return Mono.error(new RuntimeException("Failed to send RPC message: " + result));
             }
 
-            // Wait for the response
+            // Wait for the response with configured timeout (DoS protection)
             return responseSink.asMono()
-                .timeout(java.time.Duration.ofSeconds(30))
-                .doOnError(err -> pendingRequests.remove(id));
+                .timeout(java.time.Duration.ofMillis(requestTimeoutMs))
+                .doOnError(err -> {
+                    pendingRequests.remove(id);
+                    log.warn("⏱️ Request timeout for {}: {} ({}ms)", method, id, requestTimeoutMs);
+                });
         } catch (Exception e) {
             pendingRequests.remove(id);
             return Mono.error(e);

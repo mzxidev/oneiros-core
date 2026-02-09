@@ -1,5 +1,6 @@
 package io.oneiros.security;
 
+import io.oneiros.audit.SecurityAuditLogger;
 import io.oneiros.config.OneirosProperties;
 import io.oneiros.core.OneirosConfig;
 import lombok.Getter;
@@ -77,6 +78,7 @@ public class CryptoService {
     private final boolean enabled;
     private final KeyProvider keyProvider;
     private final SecureRandom secureRandom = new SecureRandom();
+    private final SecurityAuditLogger auditLogger = SecurityAuditLogger.getInstance();
 
     // Cache for password encoders with different strengths
     private final Map<String, PasswordEncoder> encoderCache = new ConcurrentHashMap<>();
@@ -281,9 +283,16 @@ public class CryptoService {
             System.arraycopy(iv, 0, combined, 0, iv.length);
             System.arraycopy(cipherText, 0, combined, iv.length, cipherText.length);
 
-            return Base64.getEncoder().encodeToString(combined);
+            String result = Base64.getEncoder().encodeToString(combined);
+
+            // SECURITY AUDIT: Log encryption event
+            auditLogger.logEncryption("AES-GCM", true);
+
+            return result;
 
         } catch (Exception e) {
+            // SECURITY AUDIT: Log failed encryption
+            auditLogger.logEncryption("AES-GCM", false);
             throw new RuntimeException("AES-GCM encryption failed", e);
         }
     }
@@ -316,9 +325,16 @@ public class CryptoService {
             cipher.init(Cipher.DECRYPT_MODE, keyProvider.getSecretKey(), spec);
 
             byte[] plainText = cipher.doFinal(cipherText);
-            return new String(plainText, StandardCharsets.UTF_8);
+            String result = new String(plainText, StandardCharsets.UTF_8);
+
+            // SECURITY AUDIT: Log decryption event
+            auditLogger.logDecryption("AES-GCM", true);
+
+            return result;
 
         } catch (Exception e) {
+            // SECURITY AUDIT: Log failed decryption
+            auditLogger.logDecryption("AES-GCM", false);
             log.error("Failed to decrypt AES-GCM data: {}", e.getMessage());
             return encryptedText;
         }

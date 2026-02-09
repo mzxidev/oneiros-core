@@ -10,28 +10,69 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import reactor.core.Disposable;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Manages LIVE SELECT subscriptions and distributes real-time events.
  * Handles automatic decryption of @OneirosEncrypted fields in live events.
+ *
+ * <p><strong>Memory Leak Prevention:</strong>
+ * Inactive queries are automatically cleaned up after 10 minutes of inactivity.
  */
 public class OneirosLiveManager {
 
     private static final Logger log = LoggerFactory.getLogger(OneirosLiveManager.class);
+    private static final long QUERY_TTL_MS = 600_000; // 10 minutes
+    private static final long CLEANUP_INTERVAL_MS = 300_000; // 5 minutes
+
+    /**
+     * Wrapper for Sink with last activity timestamp (Memory Leak Prevention).
+     */
+    private static class TimestampedSink {
+        final Sinks.Many<OneirosEvent<?>> sink;
+        final AtomicLong lastActivity;
+
+        TimestampedSink(Sinks.Many<OneirosEvent<?>> sink) {
+            this.sink = sink;
+            this.lastActivity = new AtomicLong(System.currentTimeMillis());
+        }
+
+        void touch() {
+            lastActivity.set(System.currentTimeMillis());
+        }
+
+        boolean isInactive(long cutoffTime) {
+            return lastActivity.get() < cutoffTime;
+        }
+    }
 
     private final OneirosClient client;
     private final ObjectMapper objectMapper;
     private final CryptoService cryptoService;
 
-    private final Map<String, Sinks.Many<OneirosEvent<?>>> activeLiveQueries = new ConcurrentHashMap<>();
+    // SECURITY FIX: Track query activity for automatic cleanup
+    private final Map<String, TimestampedSink> activeLiveQueries = new ConcurrentHashMap<>();
+    private final Disposable cleanupScheduler;
 
     public OneirosLiveManager(OneirosClient client, ObjectMapper objectMapper, CryptoService cryptoService) {
         this.client = client;
         this.objectMapper = objectMapper;
         this.cryptoService = cryptoService;
+
+        // Start automatic cleanup scheduler (Memory Leak Prevention)
+        this.cleanupScheduler = Mono.delay(Duration.ofMillis(CLEANUP_INTERVAL_MS))
+            .repeat()
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(tick -> cleanupInactiveQueries());
+
+        log.info("🧹 Live Query cleanup scheduler started (TTL: {}ms, Interval: {}ms)",
+            QUERY_TTL_MS, CLEANUP_INTERVAL_MS);
     }
 
     /**
@@ -49,8 +90,9 @@ public class OneirosLiveManager {
 
         Sinks.Many<OneirosEvent<T>> sink = Sinks.many().multicast().onBackpressureBuffer();
 
-        // Store with type erasure
-        activeLiveQueries.put(liveQueryId, (Sinks.Many<OneirosEvent<?>>) (Object) sink);
+        // Store with type erasure and timestamp tracking
+        TimestampedSink tsink = new TimestampedSink((Sinks.Many<OneirosEvent<?>>) (Object) sink);
+        activeLiveQueries.put(liveQueryId, tsink);
 
         String sql = buildLiveSelectSql(table, whereClause);
 
@@ -62,8 +104,11 @@ public class OneirosLiveManager {
                 String actualLiveQueryId = extractLiveQueryId(response);
 
                 if (actualLiveQueryId != null) {
-                    activeLiveQueries.remove(liveQueryId);
-                    activeLiveQueries.put(actualLiveQueryId, (Sinks.Many<OneirosEvent<?>>) (Object) sink);
+                    TimestampedSink existingTsink = activeLiveQueries.remove(liveQueryId);
+                    if (existingTsink != null) {
+                        existingTsink.touch(); // Update activity
+                        activeLiveQueries.put(actualLiveQueryId, existingTsink);
+                    }
 
                     log.info("✅ LIVE SELECT started: {}", actualLiveQueryId);
 
@@ -86,20 +131,61 @@ public class OneirosLiveManager {
 
     /**
      * Kills (stops) a running LIVE SELECT query.
+     *
+     * @throws SecurityException if liveQueryId has invalid format (SQL Injection prevention)
      */
     public Mono<Void> killLiveQuery(String liveQueryId) {
         log.info("⏹️ Killing LIVE SELECT: {}", liveQueryId);
+
+        // SECURITY FIX: Validate UUID format to prevent SQL Injection
+        if (!isValidLiveQueryId(liveQueryId)) {
+            return Mono.error(new SecurityException(
+                "Invalid live query ID format (expected UUID): " + liveQueryId
+            ));
+        }
 
         String sql = "KILL '" + liveQueryId + "'";
 
         return client.query(sql, Map.class)
             .then()
             .doOnSuccess(v -> {
-                Sinks.Many<OneirosEvent<?>> sink = activeLiveQueries.remove(liveQueryId);
-                if (sink != null) {
-                    sink.tryEmitComplete();
+                TimestampedSink tsink = activeLiveQueries.remove(liveQueryId);
+                if (tsink != null) {
+                    tsink.sink.tryEmitComplete();
                 }
             });
+    }
+
+    /**
+     * SECURITY FIX: Automatically cleans up inactive live queries (Memory Leak Prevention).
+     * Called periodically by the cleanup scheduler.
+     */
+    private void cleanupInactiveQueries() {
+        long cutoffTime = System.currentTimeMillis() - QUERY_TTL_MS;
+        int initialSize = activeLiveQueries.size();
+
+        activeLiveQueries.entrySet().removeIf(entry -> {
+            if (entry.getValue().isInactive(cutoffTime)) {
+                log.info("🧹 Cleaning up inactive live query: {} (inactive for >{}ms)",
+                    entry.getKey(), QUERY_TTL_MS);
+
+                // Kill the query on server side
+                killLiveQuery(entry.getKey()).subscribe(
+                    v -> {},
+                    error -> log.warn("Failed to kill inactive query {}: {}", entry.getKey(), error.getMessage())
+                );
+
+                // Complete the sink
+                entry.getValue().sink.tryEmitComplete();
+                return true;
+            }
+            return false;
+        });
+
+        int removed = initialSize - activeLiveQueries.size();
+        if (removed > 0) {
+            log.info("🧹 Cleaned up {} inactive live queries ({} remaining)", removed, activeLiveQueries.size());
+        }
     }
 
     /**
@@ -129,6 +215,12 @@ public class OneirosLiveManager {
 
                     OneirosEvent<T> event = new OneirosEvent<>(action, data, liveQueryId);
                     sink.tryEmitNext(event);
+
+                    // Update activity timestamp to prevent premature cleanup
+                    TimestampedSink tsink = activeLiveQueries.get(liveQueryId);
+                    if (tsink != null) {
+                        tsink.touch();
+                    }
 
                     return Mono.just(event);
                 } catch (Exception e) {
@@ -222,6 +314,23 @@ public class OneirosLiveManager {
     }
 
     /**
+     * SECURITY: Validates that the live query ID is a valid UUID format.
+     * Prevents SQL injection attacks via KILL statements.
+     *
+     * @param liveQueryId the query ID to validate
+     * @return true if valid UUID format, false otherwise
+     */
+    private boolean isValidLiveQueryId(String liveQueryId) {
+        if (liveQueryId == null || liveQueryId.isEmpty()) {
+            return false;
+        }
+
+        // UUID format: 8-4-4-4-12 hexadecimal digits
+        // Example: 550e8400-e29b-41d4-a716-446655440000
+        return liveQueryId.matches("^[a-f0-9]{8}-([a-f0-9]{4}-){3}[a-f0-9]{12}$");
+    }
+
+    /**
      * Builds the LIVE SELECT SQL statement.
      */
     private String buildLiveSelectSql(String table, String whereClause) {
@@ -240,6 +349,24 @@ public class OneirosLiveManager {
      */
     public int getActiveLiveQueryCount() {
         return activeLiveQueries.size();
+    }
+
+    /**
+     * Shuts down the live query manager and cleans up resources.
+     * Should be called when the application shuts down.
+     */
+    public void shutdown() {
+        log.info("⏹️ Shutting down OneirosLiveManager...");
+
+        // Stop cleanup scheduler
+        if (cleanupScheduler != null && !cleanupScheduler.isDisposed()) {
+            cleanupScheduler.dispose();
+        }
+
+        // Kill all active queries
+        killAllLiveQueries().block();
+
+        log.info("✅ OneirosLiveManager shut down complete");
     }
 
     /**

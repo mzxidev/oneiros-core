@@ -630,7 +630,8 @@ public class AdvancedFeaturesDemo {
         try {
             Thread.sleep(5000);
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Thread.currentThread().interrupt(); // Restore interrupt status
+            log.error("Thread interrupted while waiting for async results", e);
         }
 
         log.info("✅ All examples completed!");

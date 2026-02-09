@@ -46,6 +46,13 @@ public class OneirosConnectionPool implements OneirosClient {
     private final AtomicInteger roundRobinIndex = new AtomicInteger(0);
     private final long healthCheckIntervalSeconds;
 
+    // Backpressure & DoS protection
+    private final int maxPendingRequests;
+    private final AtomicInteger pendingRequestCount = new AtomicInteger(0);
+
+    // Rate Limiting (optional)
+    private final RateLimiter rateLimiter;
+
     private volatile boolean initialized = false;
     private volatile Disposable healthCheckScheduler;
 
@@ -69,6 +76,22 @@ public class OneirosConnectionPool implements OneirosClient {
         this.healthCheckIntervalSeconds = config.getPool() != null
             ? config.getPool().getHealthCheckInterval()
             : 30;
+        this.maxPendingRequests = config.getPool() != null
+            ? config.getPool().getMaxPendingRequests()
+            : 1000;
+
+        // Initialize rate limiter if enabled
+        if (config.getPool() != null && config.getPool().isRateLimitEnabled()) {
+            this.rateLimiter = new RateLimiter(
+                config.getPool().getRateLimitMaxRequests(),
+                Duration.ofSeconds(config.getPool().getRateLimitIntervalSeconds())
+            );
+            log.info("✅ Rate limiting enabled: {} requests per {} seconds",
+                config.getPool().getRateLimitMaxRequests(),
+                config.getPool().getRateLimitIntervalSeconds());
+        } else {
+            this.rateLimiter = null;
+        }
     }
 
     /**
@@ -88,6 +111,8 @@ public class OneirosConnectionPool implements OneirosClient {
         this.healthCheckIntervalSeconds = properties.getPool() != null
             ? properties.getPool().getHealthCheckInterval()
             : 30;
+        this.maxPendingRequests = 1000; // Default for Spring properties
+        this.rateLimiter = null; // Rate limiting not available for Spring properties (use OneirosConfig)
     }
 
     /**
@@ -192,9 +217,30 @@ public class OneirosConnectionPool implements OneirosClient {
 
     /**
      * Selects the next healthy connection using round-robin load balancing.
+     * Implements backpressure by tracking pending requests.
+     * Applies rate limiting if configured.
      */
     private Mono<PooledConnection> selectConnection() {
+        // Rate Limiting: Check if request is allowed
+        if (rateLimiter != null && !rateLimiter.tryAcquire()) {
+            log.warn("🚫 Rate limit exceeded");
+            return Mono.error(new RateLimitExceededException(
+                "Rate limit exceeded. Please retry later."
+            ));
+        }
+
+        // Backpressure: Check if pool is overloaded
+        int pending = pendingRequestCount.get();
+        if (pending >= maxPendingRequests) {
+            log.warn("🚫 Pool overloaded: {}/{} pending requests", pending, maxPendingRequests);
+            return Mono.error(new PoolOverloadedException(maxPendingRequests, pending));
+        }
+
+        // Increment pending request counter
+        pendingRequestCount.incrementAndGet();
+
         if (connections.isEmpty()) {
+            pendingRequestCount.decrementAndGet();
             return Mono.error(new IllegalStateException("No connections available in pool"));
         }
 
@@ -204,16 +250,19 @@ public class OneirosConnectionPool implements OneirosClient {
 
         if (healthyConnections.isEmpty()) {
             log.warn("⚠️ No healthy connections available, attempting recovery");
-            return recoverConnection();
+            return recoverConnection()
+                .doFinally(signal -> pendingRequestCount.decrementAndGet());
         }
 
         int index = Math.abs(roundRobinIndex.getAndIncrement() % healthyConnections.size());
         PooledConnection selected = healthyConnections.get(index);
 
-        log.debug("🎯 Selected connection #{} (health: {})",
-            connections.indexOf(selected) + 1, selected.getStatus());
+        log.debug("🎯 Selected connection #{} (health: {}, pending: {}/{})",
+            connections.indexOf(selected) + 1, selected.getStatus(), pending + 1, maxPendingRequests);
 
-        return Mono.just(selected);
+        // Decrement counter when request completes (success or error)
+        return Mono.just(selected)
+            .doFinally(signal -> pendingRequestCount.decrementAndGet());
     }
 
     /**

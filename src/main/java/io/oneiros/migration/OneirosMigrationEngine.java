@@ -67,6 +67,9 @@ public class OneirosMigrationEngine {
         this.overwrite = overwrite;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule()); // Support for Instant, LocalDateTime, etc.
+
+        // SECURITY: Harden deserialization against gadget chain attacks
+        this.objectMapper.deactivateDefaultTyping();
     }
 
     /**
@@ -274,25 +277,17 @@ public class OneirosMigrationEngine {
     }
 
     /**
-     * Record a migration in the schema history table.
+     * Record a migration in the schema history table using parameterized queries.
+     *
+     * <p>Uses parameter binding to prevent SQL injection attacks.
      */
     private Mono<Void> recordMigration(SchemaHistoryEntry entry) {
         try {
-            // Use CREATE ... SET instead of CREATE ... CONTENT to avoid datetime serialization issues
-            // SurrealDB's time::now() creates proper datetime values
-            StringBuilder query = new StringBuilder();
-            query.append("CREATE ").append(HISTORY_TABLE).append(" SET ");
-            query.append("version = ").append(entry.getVersion()).append(", ");
-            query.append("description = '").append(entry.getDescription().replace("'", "\\'")).append("', ");
-            query.append("installed_on = time::now(), ");
-            query.append("execution_time_ms = ").append(entry.getExecutionTimeMs()).append(", ");
-            query.append("success = ").append(entry.isSuccess());
+            // Use parameterized query to prevent SQL injection
+            String query = SqlInjectionPrevention.createMigrationHistoryQuery(HISTORY_TABLE);
+            Map<String, Object> params = SqlInjectionPrevention.createMigrationHistoryParams(entry);
 
-            if (entry.getErrorMessage() != null) {
-                query.append(", error_message = '").append(entry.getErrorMessage().replace("'", "\\'")).append("'");
-            }
-
-            return client.query(query.toString(), Object.class)
+            return client.query(query, params, Object.class)
                 .then()
                 .doOnSuccess(v -> log.debug("📝 Recorded migration history: V{}", entry.getVersion()));
         } catch (Exception e) {

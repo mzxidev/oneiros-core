@@ -52,6 +52,13 @@ public class OneirosProperties {
         private boolean enabled = false; // Standardmäßig aus
         private String key = ""; // Der geheime Schlüssel (Muss > 16 Zeichen sein)
 
+        @Override
+        public String toString() {
+            return "Security{" +
+                "enabled=" + enabled +
+                ", key='" + (key != null && !key.isEmpty() ? "***MASKED***" : "not set") + '\'' +
+                '}';
+        }
     }
 
     private Cache cache = new Cache();
@@ -120,6 +127,23 @@ public class OneirosProperties {
     }
 
     private CircuitBreakerConfig circuitBreaker = new CircuitBreakerConfig();
+
+    @Override
+    public String toString() {
+        return "OneirosProperties{" +
+                "url='" + url + '\'' +
+                ", namespace='" + namespace + '\'' +
+                ", database='" + database + '\'' +
+                ", username='" + username + '\'' +
+                ", password='" + (password != null && !password.isEmpty() ? "***MASKED***" : "not set") + '\'' +
+                ", autoConnect=" + autoConnect +
+                ", security=" + security +
+                ", cache=" + cache +
+                ", migration=" + migration +
+                ", pool=" + pool +
+                ", circuitBreaker=" + circuitBreaker +
+                '}';
+    }
 
     /**
      * Circuit Breaker configuration for database protection.

@@ -209,6 +209,7 @@ public class RealTimeFeaturesDemo {
         props.setDatabase("test");
 
         ObjectMapper mapper = new ObjectMapper();
+        mapper.deactivateDefaultTyping(); // SECURITY: Prevent deserialization attacks
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.of(
             CircuitBreakerConfig.ofDefaults()
         );
@@ -236,9 +237,12 @@ public class RealTimeFeaturesDemo {
         // Keep alive
         try {
             log.info("✅ Live query active. Press Ctrl+C to stop.");
-            Thread.sleep(60000); // Wait 60 seconds
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            // PERFORMANCE FIX: Use reactive delay instead of blocking Thread.sleep
+            reactor.core.publisher.Mono.delay(java.time.Duration.ofSeconds(60)).block();
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

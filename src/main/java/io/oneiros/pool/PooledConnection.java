@@ -3,10 +3,15 @@ package io.oneiros.pool;
 import io.oneiros.client.OneirosClient;
 import reactor.core.publisher.Mono;
 
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+
 
 /**
  * Wrapper around an OneirosClient that tracks its health status.
  * Used by the connection pool to identify and remove unhealthy connections.
+ *
+ * <p>Thread-safe implementation using atomic variables to prevent race conditions.
  */
 public class PooledConnection {
 
@@ -18,28 +23,29 @@ public class PooledConnection {
 
     private final OneirosClient client;
     private volatile Status status;
-    private volatile long lastUsed;
-    private volatile int failureCount;
-    private volatile long createdAt;
-    private volatile long totalRequests;
-    private volatile long successfulRequests;
-    private volatile long failedRequests;
-    private volatile long totalResponseTime; // in milliseconds
+    private final AtomicLong lastUsed;
+    private final AtomicInteger failureCount;
+    private final long createdAt;  // Immutable after construction
+    private final AtomicLong totalRequests;
+    private final AtomicLong successfulRequests;
+    private final AtomicLong failedRequests;
+    private final AtomicLong totalResponseTime; // in milliseconds
 
     public PooledConnection(OneirosClient client) {
         this.client = client;
         this.status = Status.HEALTHY;
-        this.lastUsed = System.currentTimeMillis();
-        this.createdAt = System.currentTimeMillis();
-        this.failureCount = 0;
-        this.totalRequests = 0;
-        this.successfulRequests = 0;
-        this.failedRequests = 0;
-        this.totalResponseTime = 0;
+        long now = System.currentTimeMillis();
+        this.lastUsed = new AtomicLong(now);
+        this.createdAt = now;
+        this.failureCount = new AtomicInteger(0);
+        this.totalRequests = new AtomicLong(0);
+        this.successfulRequests = new AtomicLong(0);
+        this.failedRequests = new AtomicLong(0);
+        this.totalResponseTime = new AtomicLong(0);
     }
 
     public OneirosClient getClient() {
-        this.lastUsed = System.currentTimeMillis();
+        this.lastUsed.set(System.currentTimeMillis());
         return client;
     }
 
@@ -52,22 +58,29 @@ public class PooledConnection {
     }
 
     public long getLastUsed() {
-        return lastUsed;
+        return lastUsed.get();
     }
 
     public int getFailureCount() {
-        return failureCount;
+        return failureCount.get();
     }
 
+    /**
+     * Increments failure count atomically and marks as unhealthy if threshold reached.
+     * Thread-safe implementation prevents race conditions.
+     */
     public void incrementFailureCount() {
-        this.failureCount++;
-        if (failureCount >= 3) {
+        int newCount = this.failureCount.incrementAndGet();
+        if (newCount >= 3) {
             setStatus(Status.UNHEALTHY);
         }
     }
 
+    /**
+     * Resets failure count atomically and marks as healthy.
+     */
     public void resetFailureCount() {
-        this.failureCount = 0;
+        this.failureCount.set(0);
         setStatus(Status.HEALTHY);
     }
 
@@ -76,38 +89,41 @@ public class PooledConnection {
     }
 
     /**
-     * Records a successful request and its response time.
+     * Records a successful request and its response time atomically.
+     * Thread-safe implementation.
      */
     public void recordSuccess(long responseTimeMs) {
-        this.totalRequests++;
-        this.successfulRequests++;
-        this.totalResponseTime += responseTimeMs;
-        this.lastUsed = System.currentTimeMillis();
+        this.totalRequests.incrementAndGet();
+        this.successfulRequests.incrementAndGet();
+        this.totalResponseTime.addAndGet(responseTimeMs);
+        this.lastUsed.set(System.currentTimeMillis());
     }
 
     /**
-     * Records a failed request.
+     * Records a failed request atomically.
+     * Thread-safe implementation.
      */
     public void recordFailure() {
-        this.totalRequests++;
-        this.failedRequests++;
-        this.lastUsed = System.currentTimeMillis();
+        this.totalRequests.incrementAndGet();
+        this.failedRequests.incrementAndGet();
+        this.lastUsed.set(System.currentTimeMillis());
         incrementFailureCount();
     }
 
     /**
-     * Returns connection statistics.
+     * Returns connection statistics snapshot (thread-safe).
      */
     public ConnectionStats getStats() {
+        long totalReq = totalRequests.get();
         return new ConnectionStats(
             status,
             createdAt,
-            lastUsed,
-            totalRequests,
-            successfulRequests,
-            failedRequests,
-            failureCount,
-            totalRequests > 0 ? (double) totalResponseTime / totalRequests : 0.0
+            lastUsed.get(),
+            totalReq,
+            successfulRequests.get(),
+            failedRequests.get(),
+            failureCount.get(),
+            totalReq > 0 ? (double) totalResponseTime.get() / totalReq : 0.0
         );
     }
 
