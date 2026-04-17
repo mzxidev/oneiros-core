@@ -3,6 +3,7 @@ plugins {
     id 'org.springframework.boot' version '3.4.13' apply false
     id 'io.spring.dependency-management' version '1.1.7'
     id 'maven-publish'
+    id 'signing'
 }
 
 group = 'io.oneiros'
@@ -12,6 +13,8 @@ java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(26)
     }
+    withSourcesJar()
+    withJavadocJar()
 }
 
 
@@ -22,44 +25,44 @@ repositories {
 }
 
 dependencies {
-    api 'org.springframework.boot:spring-boot-starter-webflux:3.4.13'
-    api 'org.springframework.boot:spring-boot-starter-actuator:3.4.13'
+    api 'org.springframework.boot:spring-boot-starter-webflux:4.1.0-M4'
+    api 'org.springframework.boot:spring-boot-starter-actuator:4.1.0-M4'
 
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
-    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.2'
-    implementation 'org.springframework:spring-websocket:6.2.2'
-    implementation 'io.github.resilience4j:resilience4j-reactor:2.2.0'
+    implementation 'tools.jackson.core:jackson-databind:3.1.2'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.21.2'
+    implementation 'org.springframework:spring-websocket:7.0.6'
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.4.0'
 
-    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
-    api 'org.springframework.boot:spring-boot-starter-aop:3.4.13'
-    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+    implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.4.0'
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.3'
 
     // Security - Password hashing (Argon2, BCrypt, SCrypt)
-    implementation 'org.springframework.security:spring-security-crypto:6.4.2'
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.79'
+    implementation 'org.springframework.security:spring-security-crypto:7.1.0-M3'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.84'
 
     // LZ4 Compression for backup functionality
-    implementation 'org.lz4:lz4-java:1.8.0'
+    implementation 'at.yawk.lz4:lz4-java:1.11.0'
 
-    compileOnly 'org.projectlombok:lombok:1.18.38'
-    annotationProcessor 'org.projectlombok:lombok:1.18.38'
-    testCompileOnly 'org.projectlombok:lombok:1.18.38'
-    testAnnotationProcessor 'org.projectlombok:lombok:1.18.38'
+    compileOnly 'org.projectlombok:lombok:1.18.444'
+    annotationProcessor 'org.projectlombok:lombok:1.18.44'
+    testCompileOnly 'org.projectlombok:lombok:1.18.44'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.44'
 
-    // Source: https://mvnrepository.com/artifact/io.github.classgraph/classgraph
-    implementation 'io.github.classgraph:classgraph:4.8.179'
+    implementation 'io.github.classgraph:classgraph:4.8.184'
 
 
-    testImplementation 'org.springframework.boot:spring-boot-starter-test:3.4.13'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
-    testImplementation platform('org.junit:junit-bom:5.11.4')
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.11.4'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.11.4'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:4.1.0-M4'
+    testImplementation 'org.junit.jupiter:junit-jupiter:6.1.0-M1'
+    // Source: https://mvnrepository.com/artifact/org.junit/junit-bom
+    implementation platform('org.junit:junit-bom:6.1.0-M1')
+    // Source: https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter-api
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:6.1.0-M1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:6.1.0-M1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testImplementation 'org.assertj:assertj-core:3.27.0'
-    testImplementation 'io.projectreactor:reactor-test:3.7.1'
-    testImplementation 'org.mockito:mockito-core:5.14.2'
-    testImplementation 'org.mockito:mockito-junit-jupiter:5.14.2'
+    testImplementation 'org.assertj:assertj-core:4.0.0-M1'
+    testImplementation 'io.projectreactor:reactor-test:3.8.5'
+    testImplementation 'org.mockito:mockito-core:5.23.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.23.0'
 }
 
 tasks.named('test') {
@@ -80,6 +83,53 @@ publishing {
             groupId = project.group
             artifactId = 'oneiros-core'
             version = project.version
+
+            pom {
+                name = 'Oneiros Core'
+                description = 'Core framework for the Oneiros ecosystem'
+                url = 'https://github.com/oneiros/oneiros-core' // Passen Sie die URL an
+
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                    }
+                }
+
+                developers {
+                    developer {
+                        id = 'm'
+                        name = 'M'
+                        email = 'm@example.com' // Passen Sie die E-Mail an
+                    }
+                }
+
+                scm {
+                    connection = 'scm:git:git://github.com/oneiros/oneiros-core.git' // Passen Sie die URL an
+                    developerConnection = 'scm:git:ssh://github.com/oneiros/oneiros-core.git' // Passen Sie die URL an
+                    url = 'https://github.com/oneiros/oneiros-core' // Passen Sie die URL an
+                }
+            }
         }
     }
+    repositories {
+        maven {
+            name = "OSSRH"
+            def releasesRepoUrl = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+            def snapshotsRepoUrl = "https://s01.oss.sonatype.org/content/repositories/snapshots/"
+            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+            credentials {
+                username = project.findProperty("ossrhUsername") ?: System.getenv("OSSRH_USERNAME")
+                password = project.findProperty("ossrhPassword") ?: System.getenv("OSSRH_PASSWORD")
+            }
+        }
+    }
+}
+
+signing {
+    // Requires setting signing.keyId, signing.password, and signing.secretKeyRingFile in gradle.properties
+    // OR signing.gnupg.keyName, signing.gnupg.executable
+    // See https://docs.gradle.org/current/userguide/signing_plugin.html
+    required { !project.version.endsWith('-SNAPSHOT') && gradle.taskGraph.hasTask("publish") }
+    sign publishing.publications.mavenJava
 }
