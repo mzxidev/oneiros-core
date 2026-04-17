@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import io.oneiros.migration.SqlInjectionPrevention;
 import reactor.core.Disposable;
 import reactor.core.scheduler.Schedulers;
 
@@ -22,7 +23,8 @@ import reactor.core.scheduler.Schedulers;
  * Manages LIVE SELECT subscriptions and distributes real-time events.
  * Handles automatic decryption of @OneirosEncrypted fields in live events.
  *
- * <p><strong>Memory Leak Prevention:</strong>
+ * <p>
+ * <strong>Memory Leak Prevention:</strong>
  * Inactive queries are automatically cleaned up after 10 minutes of inactivity.
  */
 public class OneirosLiveManager {
@@ -67,21 +69,21 @@ public class OneirosLiveManager {
 
         // Start automatic cleanup scheduler (Memory Leak Prevention)
         this.cleanupScheduler = Mono.delay(Duration.ofMillis(CLEANUP_INTERVAL_MS))
-            .repeat()
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe(tick -> cleanupInactiveQueries());
+                .repeat()
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(tick -> cleanupInactiveQueries());
 
         log.info("🧹 Live Query cleanup scheduler started (TTL: {}ms, Interval: {}ms)",
-            QUERY_TTL_MS, CLEANUP_INTERVAL_MS);
+                QUERY_TTL_MS, CLEANUP_INTERVAL_MS);
     }
 
     /**
      * Creates a LIVE SELECT subscription for the specified table.
      *
-     * @param table The table name
+     * @param table       The table name
      * @param entityClass The entity class
      * @param whereClause Optional WHERE clause (can be null)
-     * @param <T> The entity type
+     * @param <T>         The entity type
      * @return Flux of real-time events
      */
     @SuppressWarnings("unchecked")
@@ -99,40 +101,41 @@ public class OneirosLiveManager {
         log.info("🔴 Starting LIVE SELECT: {} (ID: {})", sql, liveQueryId);
 
         return client.query(sql, Map.class)
-            .next()
-            .flatMapMany(response -> {
-                String actualLiveQueryId = extractLiveQueryId(response);
+                .next()
+                .flatMapMany(response -> {
+                    String actualLiveQueryId = extractLiveQueryId(response);
 
-                if (actualLiveQueryId != null) {
-                    TimestampedSink existingTsink = activeLiveQueries.remove(liveQueryId);
-                    if (existingTsink != null) {
-                        existingTsink.touch(); // Update activity
-                        activeLiveQueries.put(actualLiveQueryId, existingTsink);
+                    if (actualLiveQueryId != null) {
+                        TimestampedSink existingTsink = activeLiveQueries.remove(liveQueryId);
+                        if (existingTsink != null) {
+                            existingTsink.touch(); // Update activity
+                            activeLiveQueries.put(actualLiveQueryId, existingTsink);
+                        }
+
+                        log.info("✅ LIVE SELECT started: {}", actualLiveQueryId);
+
+                        return listenToWebSocketEvents(actualLiveQueryId, entityClass, sink);
+                    } else {
+                        return Flux.error(new RuntimeException("Failed to start LIVE SELECT: No query ID returned"));
                     }
-
-                    log.info("✅ LIVE SELECT started: {}", actualLiveQueryId);
-
-                    return listenToWebSocketEvents(actualLiveQueryId, entityClass, sink);
-                } else {
-                    return Flux.error(new RuntimeException("Failed to start LIVE SELECT: No query ID returned"));
-                }
-            })
-            .doOnCancel(() -> killLiveQuery(liveQueryId).subscribe())
-            .doOnError(error -> {
-                log.error("❌ LIVE SELECT error: {}", error.getMessage());
-                sink.tryEmitError(error);
-                activeLiveQueries.remove(liveQueryId);
-            })
-            .doFinally(signal -> {
-                log.info("🔴 LIVE SELECT ended: {} ({})", liveQueryId, signal);
-                activeLiveQueries.remove(liveQueryId);
-            });
+                })
+                .doOnCancel(() -> killLiveQuery(liveQueryId).subscribe())
+                .doOnError(error -> {
+                    log.error("❌ LIVE SELECT error: {}", error.getMessage());
+                    sink.tryEmitError(error);
+                    activeLiveQueries.remove(liveQueryId);
+                })
+                .doFinally(signal -> {
+                    log.info("🔴 LIVE SELECT ended: {} ({})", liveQueryId, signal);
+                    activeLiveQueries.remove(liveQueryId);
+                });
     }
 
     /**
      * Kills (stops) a running LIVE SELECT query.
      *
-     * @throws SecurityException if liveQueryId has invalid format (SQL Injection prevention)
+     * @throws SecurityException if liveQueryId has invalid format (SQL Injection
+     *                           prevention)
      */
     public Mono<Void> killLiveQuery(String liveQueryId) {
         log.info("⏹️ Killing LIVE SELECT: {}", liveQueryId);
@@ -140,24 +143,24 @@ public class OneirosLiveManager {
         // SECURITY FIX: Validate UUID format to prevent SQL Injection
         if (!isValidLiveQueryId(liveQueryId)) {
             return Mono.error(new SecurityException(
-                "Invalid live query ID format (expected UUID): " + liveQueryId
-            ));
+                    "Invalid live query ID format (expected UUID): " + liveQueryId));
         }
 
         String sql = "KILL '" + liveQueryId + "'";
 
         return client.query(sql, Map.class)
-            .then()
-            .doOnSuccess(v -> {
-                TimestampedSink tsink = activeLiveQueries.remove(liveQueryId);
-                if (tsink != null) {
-                    tsink.sink.tryEmitComplete();
-                }
-            });
+                .then()
+                .doOnSuccess(v -> {
+                    TimestampedSink tsink = activeLiveQueries.remove(liveQueryId);
+                    if (tsink != null) {
+                        tsink.sink.tryEmitComplete();
+                    }
+                });
     }
 
     /**
-     * SECURITY FIX: Automatically cleans up inactive live queries (Memory Leak Prevention).
+     * SECURITY FIX: Automatically cleans up inactive live queries (Memory Leak
+     * Prevention).
      * Called periodically by the cleanup scheduler.
      */
     private void cleanupInactiveQueries() {
@@ -167,13 +170,13 @@ public class OneirosLiveManager {
         activeLiveQueries.entrySet().removeIf(entry -> {
             if (entry.getValue().isInactive(cutoffTime)) {
                 log.info("🧹 Cleaning up inactive live query: {} (inactive for >{}ms)",
-                    entry.getKey(), QUERY_TTL_MS);
+                        entry.getKey(), QUERY_TTL_MS);
 
                 // Kill the query on server side
                 killLiveQuery(entry.getKey()).subscribe(
-                    v -> {},
-                    error -> log.warn("Failed to kill inactive query {}: {}", entry.getKey(), error.getMessage())
-                );
+                        v -> {
+                        },
+                        error -> log.warn("Failed to kill inactive query {}: {}", entry.getKey(), error.getMessage()));
 
                 // Complete the sink
                 entry.getValue().sink.tryEmitComplete();
@@ -195,8 +198,8 @@ public class OneirosLiveManager {
         log.info("⏹️ Killing all {} LIVE SELECT queries", activeLiveQueries.size());
 
         return Flux.fromIterable(activeLiveQueries.keySet())
-            .flatMap(this::killLiveQuery)
-            .then();
+                .flatMap(this::killLiveQuery)
+                .then();
     }
 
     /**
@@ -205,40 +208,38 @@ public class OneirosLiveManager {
     private <T> Flux<OneirosEvent<T>> listenToWebSocketEvents(
             String liveQueryId,
             Class<T> entityClass,
-            Sinks.Many<OneirosEvent<T>> sink
-    ) {
+            Sinks.Many<OneirosEvent<T>> sink) {
         return client.listenToLiveQuery(liveQueryId)
-            .flatMap(notification -> {
-                try {
-                    OneirosEvent.Action action = parseAction(notification);
-                    T data = parseAndDecryptData(notification, entityClass);
+                .flatMap(notification -> {
+                    try {
+                        OneirosEvent.Action action = parseAction(notification);
+                        T data = parseAndDecryptData(notification, entityClass);
 
-                    OneirosEvent<T> event = new OneirosEvent<>(action, data, liveQueryId);
-                    sink.tryEmitNext(event);
+                        OneirosEvent<T> event = new OneirosEvent<>(action, data, liveQueryId);
+                        sink.tryEmitNext(event);
 
-                    // Update activity timestamp to prevent premature cleanup
-                    TimestampedSink tsink = activeLiveQueries.get(liveQueryId);
-                    if (tsink != null) {
-                        tsink.touch();
+                        // Update activity timestamp to prevent premature cleanup
+                        TimestampedSink tsink = activeLiveQueries.get(liveQueryId);
+                        if (tsink != null) {
+                            tsink.touch();
+                        }
+
+                        return Mono.just(event);
+                    } catch (Exception e) {
+                        log.error("❌ Error processing live event: {}", e.getMessage());
+                        OneirosEvent<T> errorEvent = new OneirosEvent<>(
+                                OneirosEvent.Action.UPDATE,
+                                null,
+                                liveQueryId,
+                                e);
+                        sink.tryEmitNext(errorEvent);
+                        return Mono.just(errorEvent);
                     }
-
-                    return Mono.just(event);
-                } catch (Exception e) {
-                    log.error("❌ Error processing live event: {}", e.getMessage());
-                    OneirosEvent<T> errorEvent = new OneirosEvent<>(
-                        OneirosEvent.Action.UPDATE,
-                        null,
-                        liveQueryId,
-                        e
-                    );
-                    sink.tryEmitNext(errorEvent);
-                    return Mono.just(errorEvent);
-                }
-            })
-            .doOnError(error -> {
-                log.error("❌ WebSocket error in LIVE SELECT: {}", error.getMessage());
-                sink.tryEmitError(error);
-            });
+                })
+                .doOnError(error -> {
+                    log.error("❌ WebSocket error in LIVE SELECT: {}", error.getMessage());
+                    sink.tryEmitError(error);
+                });
     }
 
     /**
@@ -260,9 +261,9 @@ public class OneirosLiveManager {
     }
 
     /**
-     * Parses the data from notification and automatically decrypts @OneirosEncrypted fields.
+     * Parses the data from notification and automatically
+     * decrypts @OneirosEncrypted fields.
      */
-    @SuppressWarnings("unchecked")
     private <T> T parseAndDecryptData(Map<String, Object> notification, Class<T> entityClass) {
         Object result = notification.get("result");
 
@@ -334,6 +335,9 @@ public class OneirosLiveManager {
      * Builds the LIVE SELECT SQL statement.
      */
     private String buildLiveSelectSql(String table, String whereClause) {
+        // SECURITY: Validate table name to prevent SQL injection
+        SqlInjectionPrevention.validateTableName(table);
+
         StringBuilder sql = new StringBuilder("LIVE SELECT * FROM ");
         sql.append(table);
 
@@ -373,7 +377,7 @@ public class OneirosLiveManager {
      * Fluent API entry point for creating LIVE SELECT subscriptions.
      *
      * @param entityClass The entity class to subscribe to
-     * @param <T> The entity type
+     * @param <T>         The entity type
      * @return LiveSelectBuilder for fluent configuration
      */
     public <T> LiveSelectBuilder<T> live(Class<T> entityClass) {
@@ -395,11 +399,11 @@ public class OneirosLiveManager {
 
             // Auto-detect table name from @OneirosEntity annotation
             if (entityClass.isAnnotationPresent(io.oneiros.annotation.OneirosEntity.class)) {
-                io.oneiros.annotation.OneirosEntity annotation =
-                    entityClass.getAnnotation(io.oneiros.annotation.OneirosEntity.class);
+                io.oneiros.annotation.OneirosEntity annotation = entityClass
+                        .getAnnotation(io.oneiros.annotation.OneirosEntity.class);
                 this.table = annotation.value().isEmpty()
-                    ? entityClass.getSimpleName().toLowerCase()
-                    : annotation.value();
+                        ? entityClass.getSimpleName().toLowerCase()
+                        : annotation.value();
             } else {
                 this.table = entityClass.getSimpleName().toLowerCase();
             }

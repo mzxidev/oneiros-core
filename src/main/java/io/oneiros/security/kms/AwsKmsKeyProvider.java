@@ -8,43 +8,43 @@ import org.slf4j.LoggerFactory;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
-import java.nio.ByteBuffer;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 
 /**
  * AWS KMS-based key provider for enterprise key management.
  *
- * <p><strong>Reference Implementation</strong> - This is a template showing how to
+ * <p>
+ * <strong>Reference Implementation</strong> - This is a template showing how to
  * integrate with AWS KMS. To use in production:
  * <ol>
- *   <li>Add AWS SDK dependency: {@code software.amazon.awssdk:kms}</li>
- *   <li>Uncomment the AWS KMS client code</li>
- *   <li>Configure AWS credentials (IAM role, environment variables, or AWS CLI)</li>
- *   <li>Create a KMS key in AWS console</li>
+ * <li>Add AWS SDK dependency: {@code software.amazon.awssdk:kms}</li>
+ * <li>Uncomment the AWS KMS client code</li>
+ * <li>Configure AWS credentials (IAM role, environment variables, or AWS
+ * CLI)</li>
+ * <li>Create a KMS key in AWS console</li>
  * </ol>
  *
  * <h3>Benefits of AWS KMS</h3>
  * <ul>
- *   <li>✅ Keys never leave AWS hardware security modules (HSMs)</li>
- *   <li>✅ Automatic key rotation</li>
- *   <li>✅ Fine-grained access control with IAM</li>
- *   <li>✅ Audit trail with CloudTrail</li>
- *   <li>✅ Compliance certifications (FIPS 140-2, etc.)</li>
+ * <li>✅ Keys never leave AWS hardware security modules (HSMs)</li>
+ * <li>✅ Automatic key rotation</li>
+ * <li>✅ Fine-grained access control with IAM</li>
+ * <li>✅ Audit trail with CloudTrail</li>
+ * <li>✅ Compliance certifications (FIPS 140-2, etc.)</li>
  * </ul>
  *
  * <h3>Usage Example</h3>
+ * 
  * <pre>{@code
  * // Add to build.gradle:
  * // implementation 'software.amazon.awssdk:kms:2.20.+'
  *
  * // Create provider
  * AwsKmsKeyProvider provider = new AwsKmsKeyProvider(
- *     "arn:aws:kms:us-east-1:123456789:key/abc-123",
- *     "us-east-1"
- * );
+ *         "arn:aws:kms:us-east-1:123456789:key/abc-123",
+ *         "us-east-1");
  *
  * // Use with CryptoService
  * CryptoService crypto = new CryptoService(provider);
@@ -52,11 +52,11 @@ import java.util.Optional;
  *
  * <h3>Security Considerations</h3>
  * <ul>
- *   <li>Use IAM policies to restrict KMS key access</li>
- *   <li>Enable CloudTrail logging for all KMS operations</li>
- *   <li>Use VPC endpoints for KMS to avoid internet traffic</li>
- *   <li>Implement key rotation (automatic or manual)</li>
- *   <li>Use data key caching to reduce KMS API calls</li>
+ * <li>Use IAM policies to restrict KMS key access</li>
+ * <li>Enable CloudTrail logging for all KMS operations</li>
+ * <li>Use VPC endpoints for KMS to avoid internet traffic</li>
+ * <li>Implement key rotation (automatic or manual)</li>
+ * <li>Use data key caching to reduce KMS API calls</li>
  * </ul>
  *
  * @since 0.4.3
@@ -77,7 +77,7 @@ public class AwsKmsKeyProvider implements KeyProvider {
     /**
      * Creates an AWS KMS key provider.
      *
-     * @param keyId AWS KMS key ID or ARN
+     * @param keyId  AWS KMS key ID or ARN
      * @param region AWS region (e.g., "us-east-1")
      */
     public AwsKmsKeyProvider(String keyId, String region) {
@@ -87,8 +87,8 @@ public class AwsKmsKeyProvider implements KeyProvider {
     /**
      * Creates an AWS KMS key provider with custom cache duration.
      *
-     * @param keyId AWS KMS key ID or ARN
-     * @param region AWS region
+     * @param keyId             AWS KMS key ID or ARN
+     * @param region            AWS region
      * @param cacheExpiryMillis how long to cache the data key (milliseconds)
      */
     public AwsKmsKeyProvider(String keyId, String region, long cacheExpiryMillis) {
@@ -100,10 +100,10 @@ public class AwsKmsKeyProvider implements KeyProvider {
         // Initialize AWS KMS client
         // Uncomment when AWS SDK is available:
         /*
-        this.kmsClient = KmsClient.builder()
-                .region(Region.of(region))
-                .build();
-        */
+         * this.kmsClient = KmsClient.builder()
+         * .region(Region.of(region))
+         * .build();
+         */
 
         // Generate and cache data key
         this.cachedDataKey = generateDataKey();
@@ -146,13 +146,13 @@ public class AwsKmsKeyProvider implements KeyProvider {
 
         // Uncomment when AWS SDK is available:
         /*
-        kmsClient.enableKeyRotation(req -> req.keyId(keyId));
-        log.info("✅ AWS KMS automatic rotation enabled");
-        */
+         * kmsClient.enableKeyRotation(req -> req.keyId(keyId));
+         * log.info("✅ AWS KMS automatic rotation enabled");
+         */
 
         throw new UnsupportedOperationException(
                 "Uncomment AWS KMS client code to enable rotation. " +
-                "Add dependency: software.amazon.awssdk:kms");
+                        "Add dependency: software.amazon.awssdk:kms");
     }
 
     @Override
@@ -167,8 +167,7 @@ public class AwsKmsKeyProvider implements KeyProvider {
                         "keyId", maskKeyId(keyId),
                         "cacheExpiryMillis", String.valueOf(cacheExpiryMillis),
                         "fips140_2", "true",
-                        "hsm_backed", "true"
-                ))
+                        "hsm_backed", "true"))
                 .build());
     }
 
@@ -188,17 +187,18 @@ public class AwsKmsKeyProvider implements KeyProvider {
     public void close() {
         // Uncomment when AWS SDK is available:
         /*
-        if (kmsClient != null) {
-            kmsClient.close();
-        }
-        */
+         * if (kmsClient != null) {
+         * kmsClient.close();
+         * }
+         */
         log.debug("🧹 AWS KMS KeyProvider closed");
     }
 
     /**
      * Generates a data key from AWS KMS.
      *
-     * <p>This is the core operation where AWS KMS generates a 256-bit AES key
+     * <p>
+     * This is the core operation where AWS KMS generates a 256-bit AES key
      * encrypted with the master key. The plaintext key is cached in memory,
      * while the encrypted key can be stored for re-decryption later.
      */
@@ -208,24 +208,24 @@ public class AwsKmsKeyProvider implements KeyProvider {
 
             // Uncomment when AWS SDK is available:
             /*
-            GenerateDataKeyRequest request = GenerateDataKeyRequest.builder()
-                    .keyId(keyId)
-                    .keySpec(DataKeySpec.AES_256)
-                    .build();
-
-            GenerateDataKeyResponse response = kmsClient.generateDataKey(request);
-
-            // Extract plaintext key (to use for encryption)
-            ByteBuffer plaintext = response.plaintext();
-            byte[] keyBytes = new byte[plaintext.remaining()];
-            plaintext.get(keyBytes);
-
-            // Store encrypted key for future decryption (optional)
-            // ByteBuffer encryptedKey = response.ciphertextBlob();
-
-            log.info("✅ Generated AES-256 data key from AWS KMS");
-            return new SecretKeySpec(keyBytes, "AES");
-            */
+             * GenerateDataKeyRequest request = GenerateDataKeyRequest.builder()
+             * .keyId(keyId)
+             * .keySpec(DataKeySpec.AES_256)
+             * .build();
+             * 
+             * GenerateDataKeyResponse response = kmsClient.generateDataKey(request);
+             * 
+             * // Extract plaintext key (to use for encryption)
+             * ByteBuffer plaintext = response.plaintext();
+             * byte[] keyBytes = new byte[plaintext.remaining()];
+             * plaintext.get(keyBytes);
+             * 
+             * // Store encrypted key for future decryption (optional)
+             * // ByteBuffer encryptedKey = response.ciphertextBlob();
+             * 
+             * log.info("✅ Generated AES-256 data key from AWS KMS");
+             * return new SecretKeySpec(keyBytes, "AES");
+             */
 
             // Fallback for demo (generates a random key locally)
             log.warn("⚠️ AWS SDK not available - using local random key for demo");

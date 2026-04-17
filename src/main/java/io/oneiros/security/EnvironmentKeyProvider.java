@@ -76,9 +76,12 @@ public class EnvironmentKeyProvider implements KeyProvider {
                     String.format("Environment variable '%s' is not set or empty", envVarName));
         }
 
-        if (keyValue.length() < 8) {
+        if (keyValue.length() < 14) {
             throw new KeyProviderException("ENVIRONMENT", "key_validation",
-                    String.format("Key in '%s' must be at least 8 characters", envVarName));
+                    String.format("Key in '%s' must be at least 14 characters (NIST SP 800-63B)", envVarName));
+        }
+        if (keyValue.length() < 20) {
+            log.warn("⚠️ Passphrase in {} is shorter than 20 characters. Consider using a longer passphrase.", envVarName);
         }
 
         try {
@@ -116,10 +119,8 @@ public class EnvironmentKeyProvider implements KeyProvider {
 
     private SecretKey deriveKey(String password) throws NoSuchAlgorithmException {
         try {
-            // Use PBKDF2 for secure key derivation (OWASP recommended)
-            // Salt is derived from a constant (not ideal for rotation, but better than no salt)
-            // For production: Use a properly stored/rotated salt
-            byte[] salt = "oneiros-kdf-salt-v1".getBytes(StandardCharsets.UTF_8);
+            // K1 FIX: Secure randomly generated and persistent salt instead of static string
+            byte[] salt = SaltManager.getOrCreateSalt();
 
             javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(
                 password.toCharArray(),

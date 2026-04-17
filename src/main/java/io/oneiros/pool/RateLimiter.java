@@ -4,30 +4,31 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Token bucket rate limiter for controlling request throughput.
  *
- * <p>Implements the token bucket algorithm:
+ * <p>
+ * Implements the token bucket algorithm:
  * <ul>
- *   <li>Bucket has a maximum capacity of tokens</li>
- *   <li>Tokens are added at a fixed rate</li>
- *   <li>Each request consumes one token</li>
- *   <li>If no tokens available, request is throttled</li>
+ * <li>Bucket has a maximum capacity of tokens</li>
+ * <li>Tokens are added at a fixed rate</li>
+ * <li>Each request consumes one token</li>
+ * <li>If no tokens available, request is throttled</li>
  * </ul>
  *
  * <h3>Use Cases</h3>
  * <ul>
- *   <li>Prevent connection pool overload</li>
- *   <li>Protect against DDoS attacks</li>
- *   <li>Fair resource allocation</li>
- *   <li>Cost control (cloud pricing)</li>
+ * <li>Prevent connection pool overload</li>
+ * <li>Protect against DDoS attacks</li>
+ * <li>Fair resource allocation</li>
+ * <li>Cost control (cloud pricing)</li>
  * </ul>
  *
  * <h3>Example</h3>
+ * 
  * <pre>{@code
  * // Allow 100 requests per second
  * RateLimiter limiter = new RateLimiter(100, Duration.ofSeconds(1));
@@ -54,7 +55,7 @@ public class RateLimiter {
     /**
      * Creates a rate limiter with specified capacity and refill rate.
      *
-     * @param maxTokens maximum number of tokens in the bucket
+     * @param maxTokens      maximum number of tokens in the bucket
      * @param refillInterval interval at which tokens are refilled
      */
     public RateLimiter(int maxTokens, Duration refillInterval) {
@@ -76,26 +77,30 @@ public class RateLimiter {
     /**
      * Attempts to acquire a token.
      *
-     * <p>Returns immediately without blocking. If no tokens are available,
-     * returns false and the caller should handle rate limiting (retry, reject, etc.).
+     * <p>
+     * Returns immediately without blocking. If no tokens are available,
+     * returns false and the caller should handle rate limiting (retry, reject,
+     * etc.).
      *
      * @return true if token was acquired, false if rate limit exceeded
      */
     public boolean tryAcquire() {
         refillTokens();
 
-        int current = availableTokens.get();
-        if (current > 0) {
+        // SECURITY FIX: Iterative CAS loop instead of recursive call
+        // Prevents StackOverflowError under extreme contention
+        while (true) {
+            int current = availableTokens.get();
+            if (current <= 0) {
+                log.debug("🔴 Rate limit exceeded (0 tokens available)");
+                return false;
+            }
             if (availableTokens.compareAndSet(current, current - 1)) {
                 log.trace("🟢 Token acquired ({} remaining)", current - 1);
                 return true;
             }
-            // CAS failed, retry once
-            return tryAcquire();
+            // CAS failed due to contention, retry immediately (iterative, not recursive)
         }
-
-        log.debug("🔴 Rate limit exceeded (0 tokens available)");
-        return false;
     }
 
     /**
@@ -114,24 +119,26 @@ public class RateLimiter {
 
         refillTokens();
 
-        int current = availableTokens.get();
-        if (current >= tokens) {
+        // SECURITY FIX: Iterative CAS loop instead of recursive call
+        while (true) {
+            int current = availableTokens.get();
+            if (current < tokens) {
+                log.debug("🔴 Rate limit exceeded (requested: {}, available: {})", tokens, current);
+                return false;
+            }
             if (availableTokens.compareAndSet(current, current - tokens)) {
                 log.trace("🟢 {} tokens acquired ({} remaining)", tokens, current - tokens);
                 return true;
             }
-            // CAS failed, retry once
-            return tryAcquire(tokens);
+            // CAS failed due to contention, retry immediately
         }
-
-        log.debug("🔴 Rate limit exceeded (requested: {}, available: {})", tokens, current);
-        return false;
     }
 
     /**
      * Returns a token to the bucket (e.g., after failed operation).
      *
-     * <p>Useful for compensating when an operation fails before consuming resources.
+     * <p>
+     * Useful for compensating when an operation fails before consuming resources.
      */
     public void release() {
         int current = availableTokens.get();
@@ -144,7 +151,8 @@ public class RateLimiter {
     /**
      * Refills tokens based on elapsed time since last refill.
      *
-     * <p>Uses nano-precision timing for accurate token distribution.
+     * <p>
+     * Uses nano-precision timing for accurate token distribution.
      */
     private void refillTokens() {
         long now = System.nanoTime();

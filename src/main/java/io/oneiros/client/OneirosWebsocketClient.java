@@ -1,14 +1,16 @@
 package io.oneiros.client;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.type.CollectionType;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
-import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
-import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import io.oneiros.antigravity.event.InternalEventBus;
+import io.oneiros.antigravity.event.OneirosEvent;
 import io.oneiros.client.rpc.RpcRequest;
 import io.oneiros.client.rpc.RpcResponse;
+import io.oneiros.client.rpc.SurrealResult;
 import io.oneiros.config.OneirosProperties;
 import io.oneiros.core.OneirosConfig;
 import io.oneiros.transaction.OneirosTransaction;
@@ -18,6 +20,8 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.WebsocketClientSpec;
 import reactor.netty.http.websocket.WebsocketInbound;
@@ -28,27 +32,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 
 /**
- * Framework-agnostic reactive WebSocket client implementing the full SurrealDB RPC protocol.
+ * Framework-agnostic reactive WebSocket client implementing the full SurrealDB
+ * RPC protocol.
  * Uses Reactor Netty directly (no Spring dependencies).
  *
- * <p>Provides non-blocking access to all SurrealDB operations including:
+ * <p>
+ * Provides non-blocking access to all SurrealDB operations including:
  * <ul>
- *   <li>Connection management (signin, use, reset)</li>
- *   <li>CRUD operations (select, create, update, delete, etc.)</li>
- *   <li>Graph relations (relate, insert_relation)</li>
- *   <li>Real-time queries (live, kill)</li>
- *   <li>Session management (let, unset, authenticate)</li>
+ * <li>Connection management (signin, use, reset)</li>
+ * <li>CRUD operations (select, create, update, delete, etc.)</li>
+ * <li>Graph relations (relate, insert_relation)</li>
+ * <li>Real-time queries (live, kill)</li>
+ * <li>Session management (let, unset, authenticate)</li>
  * </ul>
  *
- * <p>Works with both {@link OneirosConfig} (framework-agnostic) and
+ * <p>
+ * Works with both {@link OneirosConfig} (framework-agnostic) and
  * {@link OneirosProperties} (Spring Boot).
  */
 public class OneirosWebsocketClient implements OneirosClient {
 
     private static final Logger log = LoggerFactory.getLogger(OneirosWebsocketClient.class);
+
+    private final String clientId = UUID.randomUUID().toString().substring(0, 8);
+    private final InternalEventBus eventBus = InternalEventBus.getInstance();
+
+    // Modern Java 21+ Virtual Thread Scheduler for background tasks
+    private static final Scheduler VIRTUAL_THREAD_SCHEDULER = Schedulers.fromExecutor(
+            Executors.newVirtualThreadPerTaskExecutor()
+    );
 
     // Configuration - supports both types
     private final String url;
@@ -67,18 +83,20 @@ public class OneirosWebsocketClient implements OneirosClient {
     // Transaction support
     private final OneirosTransactionManager transactionManager;
 
-    // The send sink for outgoing messages - multicast allows multiple subscribers (for reconnects)
+    // The send sink for outgoing messages - multicast allows multiple subscribers
+    // (for reconnects)
     private final Sinks.Many<String> sendSink = Sinks.many().multicast().onBackpressureBuffer();
     private volatile boolean isConnecting = false;
     private volatile boolean isConnected = false;
 
     // Speicher für offene Anfragen: Request-ID -> Antwort-Kanal
-    private final Map<String, Sinks.One<RpcResponse>> pendingRequests = new ConcurrentHashMap<>();
+    private final Map<String, Sinks.One<RpcResponse<?>>> pendingRequests = new ConcurrentHashMap<>();
 
     // Live Query support: Live Query ID -> Event Sink
     private final Map<String, Sinks.Many<Map<String, Object>>> liveQuerySinks = new ConcurrentHashMap<>();
 
-    // Signal for when connection initialization is complete (reset for each connection attempt)
+    // Signal for when connection initialization is complete (reset for each
+    // connection attempt)
     private volatile Sinks.One<Void> initCompleteSink = Sinks.one();
 
     /**
@@ -157,24 +175,25 @@ public class OneirosWebsocketClient implements OneirosClient {
 
         // Start the WebSocket connection in the background
         httpClient.websocket(wsSpec)
-            .uri(uri)
-            .handle((inbound, outbound) -> handleWebSocket(inbound, outbound, uri))
-            .retry(3)
-            .doOnError(e -> {
-                log.error("💥 Connection fatal error: {}", e.getMessage());
-                isConnecting = false;
-                isConnected = false;
-                initCompleteSink.tryEmitError(e);
-            })
-            .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
-            .subscribe(
-                v -> {},
-                err -> log.error("❌ WebSocket connection error: {}", err.getMessage()),
-                () -> {
-                    log.debug("📡 WebSocket connection closed");
+                .uri(uri)
+                .handle((inbound, outbound) -> handleWebSocket(inbound, outbound, uri))
+                .retry(3)
+                .doOnError(e -> {
+                    log.error("💥 Connection fatal error: {}", e.getMessage());
+                    isConnecting = false;
                     isConnected = false;
-                }
-            );
+                    eventBus.publish(new OneirosEvent.Disconnected(clientId, e));
+                    initCompleteSink.tryEmitError(e);
+                })
+                .subscribeOn(VIRTUAL_THREAD_SCHEDULER)
+                .subscribe(
+                        v -> {
+                        },
+                        err -> log.error("❌ WebSocket connection error: {}", err.getMessage()),
+                        () -> {
+                            log.debug("📡 WebSocket connection closed");
+                            isConnected = false;
+                        });
 
         // Wait for init to complete (signaled via initCompleteSink)
         return initCompleteSink.asMono()
@@ -191,87 +210,100 @@ public class OneirosWebsocketClient implements OneirosClient {
         // Mark as connected BEFORE running init, so RPC calls work
         isConnected = true;
         isConnecting = false;
+        eventBus.publish(new OneirosEvent.Connected(clientId));
 
         // The receive handler processes incoming messages
         Mono<Void> receiveHandler = inbound.receive()
-            .asString()
-            .doOnNext(this::handleIncomingMessage)
-            .doOnError(err -> log.error("💥 Receive error: {}", err.getMessage()))
-            .doOnComplete(() -> {
-                log.debug("WebSocket receive completed");
-                isConnected = false;
-            })
-            .then();
+                .asString()
+                .doOnNext(this::handleIncomingMessage)
+                .doOnError(err -> log.error("💥 Receive error: {}", err.getMessage()))
+                .doOnComplete(() -> {
+                    log.debug("WebSocket receive completed");
+                    isConnected = false;
+                })
+                .then();
 
         // The send handler processes outgoing messages from sendSink
         Mono<Void> sendHandler = outbound
-            .sendString(sendSink.asFlux())
-            .then();
+                .sendString(sendSink.asFlux())
+                .then();
 
         // Authentication and namespace selection
         Mono<Void> init = rpc("signin", Map.of("user", this.username, "pass", this.password))
-            .doOnSuccess(response -> log.debug("✅ Signin response received"))
-            .doOnError(err -> log.error("❌ Signin failed: {}", err.getMessage()))
-            .flatMap(signinResp -> {
-                if (this.namespace != null && this.database != null) {
-                    return rpc("use", this.namespace, this.database)
-                        .doOnSuccess(response -> log.debug("✅ Use response received"))
-                        .doOnError(err -> log.error("❌ Use failed: {}", err.getMessage()));
-                } else {
-                    return Mono.just(signinResp);
-                }
-            })
-            .then()
-            .timeout(java.time.Duration.ofSeconds(10))
-            .doOnSuccess(v -> {
-                log.debug("✅ Connection initialization complete");
-                initCompleteSink.tryEmitValue(null);
-            })
-            .doOnError(err -> {
-                log.error("💥 Init failed: {}", err.getMessage(), err);
-                isConnecting = false;
-                isConnected = false;
-                initCompleteSink.tryEmitError(err);
-            });
+                .doOnSuccess(response -> log.debug("✅ Signin response received"))
+                .doOnError(err -> log.error("❌ Signin failed: {}", err.getMessage()))
+                .flatMap(signinResp -> {
+                    if (this.namespace != null && this.database != null) {
+                        return rpc("use", this.namespace, this.database)
+                                .doOnSuccess(response -> log.debug("✅ Use response received"))
+                                .doOnError(err -> log.error("❌ Use failed: {}", err.getMessage()));
+                    } else {
+                        return Mono.just(signinResp);
+                    }
+                })
+                .then()
+                .timeout(java.time.Duration.ofSeconds(10))
+                .doOnSuccess(v -> {
+                    log.debug("✅ Connection initialization complete");
+                    initCompleteSink.tryEmitValue(null);
+                })
+                .doOnError(err -> {
+                    log.error("💥 Init failed: {}", err.getMessage(), err);
+                    isConnecting = false;
+                    isConnected = false;
+                    initCompleteSink.tryEmitError(err);
+                });
 
         // CRITICAL: receiveHandler, sendHandler and init MUST run in PARALLEL
-        // - receiveHandler processes incoming WebSocket messages (including RPC responses)
+        // - receiveHandler processes incoming WebSocket messages (including RPC
+        // responses)
         // - sendHandler sends outgoing messages from the sink
         // - init sends RPC requests (signin, use) and waits for responses
         // If they run sequentially, we get a deadlock:
-        //   init waits for response -> response can't arrive because receiveHandler isn't running
+        // init waits for response -> response can't arrive because receiveHandler isn't
+        // running
         //
         // Using Flux.merge ensures all three start immediately and run concurrently.
         // The returned Mono completes when ALL complete (receiveHandler runs forever,
         // so the WebSocket stays open)
         return Flux.merge(
-            receiveHandler.flux(),
-            sendHandler.flux(),
-            init.flux()
-        ).then();
+                receiveHandler.flux(),
+                sendHandler.flux(),
+                init.flux()).then();
     }
 
     private void handleIncomingMessage(String json) {
         log.trace("📥 RX: {}", json);
 
         try {
-            RpcResponse response = mapper.readValue(json, RpcResponse.class);
+            JsonNode node = mapper.readTree(json);
+            SurrealResult<?> result = toSurrealResult(node);
 
-            if (response.id() != null) {
-                Sinks.One<RpcResponse> sink = pendingRequests.remove(response.id());
-                if (sink != null) {
-                    if (response.error() != null) {
-                        log.warn("⚠️ RPC error for {}: {}", response.id(), response.error());
+            // Modern Java 21 switch with pattern matching
+            switch (result) {
+                case SurrealResult.Success<?> success -> {
+                    Sinks.One<RpcResponse<?>> sink = pendingRequests.remove(success.id());
+                    if (sink != null) {
+                        sink.tryEmitValue(new RpcResponse<>(success.id(), success.result(), null));
+                    } else {
+                        log.warn("⚠️ Received success for unknown ID: {}", success.id());
                     }
-                    sink.tryEmitValue(response);
-                } else {
-                    log.warn("⚠️ Received response for unknown ID: {}", response.id());
                 }
-            } else {
-                // Check if this is a live query notification
-                @SuppressWarnings("unchecked")
-                Map<String, Object> notificationMap = mapper.readValue(json, Map.class);
-                handleLiveQueryNotification(notificationMap);
+                case SurrealResult.Failure<?> failure -> {
+                    Sinks.One<RpcResponse<?>> sink = pendingRequests.remove(failure.id());
+                    if (sink != null) {
+                        log.warn("⚠️ RPC error for {}: {}", failure.id(), failure.error());
+                        sink.tryEmitValue(new RpcResponse<>(failure.id(), null, failure.error()));
+                    } else {
+                        log.warn("⚠️ Received failure for unknown ID: {}", failure.id());
+                    }
+                }
+                case SurrealResult.LiveNotification live -> {
+                    Sinks.Many<Map<String, Object>> sink = liveQuerySinks.get(live.liveQueryId());
+                    if (sink != null) {
+                        sink.tryEmitNext(live.data());
+                    }
+                }
             }
         } catch (Exception e) {
             log.error("💥 Failed to parse incoming message: {}", e.getMessage(), e);
@@ -279,7 +311,29 @@ public class OneirosWebsocketClient implements OneirosClient {
         }
     }
 
+    private SurrealResult<?> toSurrealResult(JsonNode node) {
+        if (node.has("id") && !node.get("id").isNull()) {
+            String id = node.get("id").asText();
+            if (node.has("error") && !node.get("error").isNull()) {
+                return new SurrealResult.Failure<>(id, node.get("error"));
+            } else {
+                return new SurrealResult.Success<>(id, node.get("result"));
+            }
+        } else {
+            // Check if this is a live query notification
+            JsonNode result = node.get("result");
+            if (result != null && result.isObject() && result.has("id")) {
+                String liveQueryId = result.get("id").asText();
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = mapper.convertValue(node, Map.class);
+                return new SurrealResult.LiveNotification(liveQueryId, data);
+            }
+        }
+        return null; // Should not happen with valid SurrealDB messages
+    }
+
     private void handleLiveQueryNotification(Map<String, Object> notification) {
+        // Redundant with new handleIncomingMessage logic, but kept for internal calls if any
         String liveQueryId = extractLiveQueryId(notification);
 
         if (liveQueryId != null) {
@@ -374,7 +428,8 @@ public class OneirosWebsocketClient implements OneirosClient {
     @Override
     public Mono<Map<String, Object>> version() {
         return rpc("version")
-                .map(response -> mapper.convertValue(response.result(), new TypeReference<Map<String, Object>>() {}))
+                .map(response -> mapper.convertValue(response.result(), new TypeReference<Map<String, Object>>() {
+                }))
                 .doOnSuccess(v -> log.debug("✅ Retrieved version: {}", v.get("version")));
     }
 
@@ -427,9 +482,10 @@ public class OneirosWebsocketClient implements OneirosClient {
                         }
 
                         List<Map<String, Object>> queryResults = mapper.convertValue(
-                                response.result(), new TypeReference<List<Map<String, Object>>>() {}
-                        );
-                        if (queryResults == null || queryResults.isEmpty()) return Flux.empty();
+                                response.result(), new TypeReference<List<Map<String, Object>>>() {
+                                });
+                        if (queryResults == null || queryResults.isEmpty())
+                            return Flux.empty();
 
                         Map<String, Object> firstSet = queryResults.getFirst();
                         String status = (String) firstSet.get("status");
@@ -452,9 +508,11 @@ public class OneirosWebsocketClient implements OneirosClient {
                         }
 
                         Object rawResultData = firstSet.get("result");
-                        if (rawResultData == null) return Flux.empty();
+                        if (rawResultData == null)
+                            return Flux.empty();
 
-                        CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                        CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                resultType);
                         List<T> typedList = mapper.convertValue(rawResultData, listType);
                         return Flux.fromIterable(typedList);
                     } catch (Exception e) {
@@ -467,7 +525,8 @@ public class OneirosWebsocketClient implements OneirosClient {
     @Override
     public Mono<Map<String, Object>> graphql(Object query, Map<String, Object> options) {
         return rpc("graphql", query, options)
-                .map(response -> mapper.convertValue(response.result(), new TypeReference<Map<String, Object>>() {}))
+                .map(response -> mapper.convertValue(response.result(), new TypeReference<Map<String, Object>>() {
+                }))
                 .doOnSuccess(result -> log.debug("✅ GraphQL query executed"))
                 .doOnError(e -> log.error("❌ GraphQL query failed: {}", e.getMessage()));
     }
@@ -475,12 +534,12 @@ public class OneirosWebsocketClient implements OneirosClient {
     @Override
     public <T> Mono<T> run(String functionName, String version, List<Object> args, Class<T> resultType) {
         Object[] params = version != null && args != null
-            ? new Object[]{functionName, version, args}
-            : version != null
-                ? new Object[]{functionName, version}
-                : args != null
-                    ? new Object[]{functionName, null, args}
-                    : new Object[]{functionName};
+                ? new Object[] { functionName, version, args }
+                : version != null
+                        ? new Object[] { functionName, version }
+                        : args != null
+                                ? new Object[] { functionName, null, args }
+                                : new Object[] { functionName };
 
         return rpc("run", params)
                 .map(response -> mapper.convertValue(response.result(), resultType))
@@ -510,7 +569,7 @@ public class OneirosWebsocketClient implements OneirosClient {
             return Flux.error(e);
         }
 
-        Object[] params = options != null ? new Object[]{thing, options} : new Object[]{thing};
+        Object[] params = options != null ? new Object[] { thing, options } : new Object[] { thing };
 
         return rpc("select", params)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
@@ -522,7 +581,8 @@ public class OneirosWebsocketClient implements OneirosClient {
 
                         // Result can be a single object or an array
                         if (response.result() instanceof List) {
-                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                    resultType);
                             List<T> results = mapper.convertValue(response.result(), listType);
                             return Flux.fromIterable(results);
                         } else {
@@ -580,7 +640,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
                 .flatMapMany(response -> {
                     try {
-                        CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                        CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                resultType);
                         List<T> results = mapper.convertValue(response.result(), listType);
                         return Flux.fromIterable(results);
                     } catch (Exception e) {
@@ -609,7 +670,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                 .flatMapMany(response -> {
                     try {
                         if (response.result() instanceof List) {
-                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                    resultType);
                             List<T> results = mapper.convertValue(response.result(), listType);
                             return Flux.fromIterable(results);
                         } else {
@@ -630,7 +692,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                 .flatMapMany(response -> {
                     try {
                         if (response.result() instanceof List) {
-                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                    resultType);
                             List<T> results = mapper.convertValue(response.result(), listType);
                             return Flux.fromIterable(results);
                         } else {
@@ -651,7 +714,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                 .flatMapMany(response -> {
                     try {
                         if (response.result() instanceof List) {
-                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                    resultType);
                             List<T> results = mapper.convertValue(response.result(), listType);
                             return Flux.fromIterable(results);
                         } else {
@@ -672,9 +736,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                 .flatMapMany(response -> {
                     try {
                         CollectionType listType = mapper.getTypeFactory().constructCollectionType(
-                            List.class,
-                            mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class)
-                        );
+                                List.class,
+                                mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
                         List<Map<String, Object>> results = mapper.convertValue(response.result(), listType);
                         return Flux.fromIterable(results);
                     } catch (Exception e) {
@@ -695,7 +758,8 @@ public class OneirosWebsocketClient implements OneirosClient {
                         }
 
                         if (response.result() instanceof List) {
-                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class, resultType);
+                            CollectionType listType = mapper.getTypeFactory().constructCollectionType(List.class,
+                                    resultType);
                             List<T> results = mapper.convertValue(response.result(), listType);
                             return Flux.fromIterable(results);
                         } else {
@@ -716,8 +780,8 @@ public class OneirosWebsocketClient implements OneirosClient {
     @Override
     public <T> Mono<T> relate(String in, String relation, String out, Object data, Class<T> resultType) {
         Object[] params = data != null
-            ? new Object[]{in, relation, out, data}
-            : new Object[]{in, relation, out};
+                ? new Object[] { in, relation, out, data }
+                : new Object[] { in, relation, out };
 
         return rpc("relate", params)
                 .transform(CircuitBreakerOperator.of(circuitBreaker))
@@ -764,8 +828,8 @@ public class OneirosWebsocketClient implements OneirosClient {
         liveQuerySinks.put(liveQueryId, sink);
 
         return sink.asFlux()
-            .doFinally(signal -> liveQuerySinks.remove(liveQueryId))
-            .doOnSubscribe(s -> log.debug("👂 Listening to live query {}", liveQueryId));
+                .doFinally(signal -> liveQuerySinks.remove(liveQueryId))
+                .doOnSubscribe(s -> log.debug("👂 Listening to live query {}", liveQueryId));
     }
 
     @Override
@@ -785,19 +849,18 @@ public class OneirosWebsocketClient implements OneirosClient {
     @Override
     public <T> Mono<T> transaction(Function<OneirosTransaction, Mono<T>> transactionBlock) {
         return transactionManager.execute(transactionBlock)
-            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
+                .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
     }
 
     @Override
     public <T> Flux<T> transactionMany(Function<OneirosTransaction, Flux<T>> transactionBlock) {
         return transactionManager.executeMany(transactionBlock)
-            .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
+                .transformDeferred(CircuitBreakerOperator.of(circuitBreaker));
     }
-
 
     // --- Private Helpers ---
 
-    private Mono<RpcResponse> rpc(String method, Object... params) {
+    private Mono<RpcResponse<?>> rpc(String method, Object... params) {
         return waitForConnection().then(Mono.defer(() -> sendRpc(method, params)));
     }
 
@@ -810,21 +873,21 @@ public class OneirosWebsocketClient implements OneirosClient {
         // If connecting, wait for init to complete
         if (isConnecting) {
             return initCompleteSink.asMono()
-                .timeout(java.time.Duration.ofSeconds(20))
-                .doOnError(err -> log.error("⏱️ Timeout waiting for connection: {}", err.getMessage()));
+                    .timeout(java.time.Duration.ofSeconds(20))
+                    .doOnError(err -> log.error("⏱️ Timeout waiting for connection: {}", err.getMessage()));
         }
 
         // Not connected -> start connection
         return connect()
-            .timeout(java.time.Duration.ofSeconds(20))
-            .doOnError(err -> log.error("⏱️ Timeout during connection: {}", err.getMessage()));
+                .timeout(java.time.Duration.ofSeconds(20))
+                .doOnError(err -> log.error("⏱️ Timeout during connection: {}", err.getMessage()));
     }
 
-    private Mono<RpcResponse> sendRpc(String method, Object... params) {
+    private Mono<RpcResponse<?>> sendRpc(String method, Object... params) {
         String id = UUID.randomUUID().toString();
         RpcRequest request = new RpcRequest(id, method, List.of(params));
 
-        Sinks.One<RpcResponse> responseSink = Sinks.one();
+        Sinks.One<RpcResponse<?>> responseSink = Sinks.one();
         pendingRequests.put(id, responseSink);
 
         try {
@@ -840,11 +903,11 @@ public class OneirosWebsocketClient implements OneirosClient {
 
             // Wait for the response with configured timeout (DoS protection)
             return responseSink.asMono()
-                .timeout(java.time.Duration.ofMillis(requestTimeoutMs))
-                .doOnError(err -> {
-                    pendingRequests.remove(id);
-                    log.warn("⏱️ Request timeout for {}: {} ({}ms)", method, id, requestTimeoutMs);
-                });
+                    .timeout(java.time.Duration.ofMillis(requestTimeoutMs))
+                    .doOnError(err -> {
+                        pendingRequests.remove(id);
+                        log.warn("⏱️ Request timeout for {}: {} ({}ms)", method, id, requestTimeoutMs);
+                    });
         } catch (Exception e) {
             pendingRequests.remove(id);
             return Mono.error(e);

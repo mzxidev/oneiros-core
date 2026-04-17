@@ -9,32 +9,35 @@ import org.slf4j.LoggerFactory;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 
 /**
  * Azure Key Vault-based key provider for enterprise key management.
  *
- * <p><strong>Reference Implementation</strong> - Template for Azure Key Vault integration.
+ * <p>
+ * <strong>Reference Implementation</strong> - Template for Azure Key Vault
+ * integration.
  * To use in production:
  * <ol>
- *   <li>Add Azure SDK: {@code com.azure:azure-security-keyvault-secrets}</li>
- *   <li>Uncomment the Key Vault client code</li>
- *   <li>Configure Azure credentials (Managed Identity, Service Principal, or Azure CLI)</li>
- *   <li>Create a Key Vault in Azure Portal</li>
+ * <li>Add Azure SDK: {@code com.azure:azure-security-keyvault-secrets}</li>
+ * <li>Uncomment the Key Vault client code</li>
+ * <li>Configure Azure credentials (Managed Identity, Service Principal, or
+ * Azure CLI)</li>
+ * <li>Create a Key Vault in Azure Portal</li>
  * </ol>
  *
  * <h3>Benefits of Azure Key Vault</h3>
  * <ul>
- *   <li>✅ HSM-backed key storage (Premium tier)</li>
- *   <li>✅ Automatic key versioning</li>
- *   <li>✅ Azure Active Directory integration</li>
- *   <li>✅ Azure Monitor logging</li>
- *   <li>✅ FIPS 140-2 Level 2 validated</li>
+ * <li>✅ HSM-backed key storage (Premium tier)</li>
+ * <li>✅ Automatic key versioning</li>
+ * <li>✅ Azure Active Directory integration</li>
+ * <li>✅ Azure Monitor logging</li>
+ * <li>✅ FIPS 140-2 Level 2 validated</li>
  * </ul>
  *
  * <h3>Usage Example</h3>
+ * 
  * <pre>{@code
  * // Add to build.gradle:
  * // implementation 'com.azure:azure-security-keyvault-secrets:4.6.+'
@@ -42,9 +45,8 @@ import java.util.Optional;
  *
  * // Create provider
  * AzureKeyVaultProvider provider = new AzureKeyVaultProvider(
- *     "https://myvault.vault.azure.net",
- *     "oneiros-encryption-key"
- * );
+ *         "https://myvault.vault.azure.net",
+ *         "oneiros-encryption-key");
  *
  * // Use with CryptoService
  * CryptoService crypto = new CryptoService(provider);
@@ -52,9 +54,9 @@ import java.util.Optional;
  *
  * <h3>Authentication Options</h3>
  * <ul>
- *   <li>Managed Identity (recommended for Azure VMs/containers)</li>
- *   <li>Service Principal (client ID + secret)</li>
- *   <li>Azure CLI credentials (for local development)</li>
+ * <li>Managed Identity (recommended for Azure VMs/containers)</li>
+ * <li>Service Principal (client ID + secret)</li>
+ * <li>Azure CLI credentials (for local development)</li>
  * </ul>
  *
  * @since 0.4.3
@@ -75,7 +77,7 @@ public class AzureKeyVaultProvider implements KeyProvider {
     /**
      * Creates an Azure Key Vault provider.
      *
-     * @param vaultUrl Key Vault URL (e.g., "https://myvault.vault.azure.net")
+     * @param vaultUrl   Key Vault URL (e.g., "https://myvault.vault.azure.net")
      * @param secretName Name of the secret containing the encryption key
      */
     public AzureKeyVaultProvider(String vaultUrl, String secretName) {
@@ -85,8 +87,8 @@ public class AzureKeyVaultProvider implements KeyProvider {
     /**
      * Creates an Azure Key Vault provider with custom cache duration.
      *
-     * @param vaultUrl Key Vault URL
-     * @param secretName Secret name
+     * @param vaultUrl          Key Vault URL
+     * @param secretName        Secret name
      * @param cacheExpiryMillis cache duration in milliseconds
      */
     public AzureKeyVaultProvider(String vaultUrl, String secretName, long cacheExpiryMillis) {
@@ -98,12 +100,13 @@ public class AzureKeyVaultProvider implements KeyProvider {
         // Initialize Azure Key Vault client
         // Uncomment when Azure SDK is available:
         /*
-        DefaultAzureCredential credential = new DefaultAzureCredentialBuilder().build();
-        this.secretClient = new SecretClientBuilder()
-                .vaultUrl(vaultUrl)
-                .credential(credential)
-                .buildClient();
-        */
+         * DefaultAzureCredential credential = new
+         * DefaultAzureCredentialBuilder().build();
+         * this.secretClient = new SecretClientBuilder()
+         * .vaultUrl(vaultUrl)
+         * .credential(credential)
+         * .buildClient();
+         */
 
         // Fetch and cache the key
         this.cachedKey = fetchKeyFromVault();
@@ -145,21 +148,21 @@ public class AzureKeyVaultProvider implements KeyProvider {
 
         // Uncomment when Azure SDK is available:
         /*
-        // Generate new key value
-        java.security.SecureRandom random = new java.security.SecureRandom();
-        byte[] newKeyBytes = new byte[32];
-        random.nextBytes(newKeyBytes);
-        String newKeyValue = Base64.getEncoder().encodeToString(newKeyBytes);
-
-        // Store as new version in Key Vault
-        secretClient.setSecret(secretName, newKeyValue);
-
-        log.info("✅ Key rotated in Azure Key Vault (new version created)");
-        */
+         * // Generate new key value
+         * java.security.SecureRandom random = new java.security.SecureRandom();
+         * byte[] newKeyBytes = new byte[32];
+         * random.nextBytes(newKeyBytes);
+         * String newKeyValue = Base64.getEncoder().encodeToString(newKeyBytes);
+         * 
+         * // Store as new version in Key Vault
+         * secretClient.setSecret(secretName, newKeyValue);
+         * 
+         * log.info("✅ Key rotated in Azure Key Vault (new version created)");
+         */
 
         throw new UnsupportedOperationException(
                 "Uncomment Azure SDK code to enable rotation. " +
-                "Add dependencies: com.azure:azure-security-keyvault-secrets, com.azure:azure-identity");
+                        "Add dependencies: com.azure:azure-security-keyvault-secrets, com.azure:azure-identity");
     }
 
     @Override
@@ -175,8 +178,7 @@ public class AzureKeyVaultProvider implements KeyProvider {
                         "secretName", secretName,
                         "cacheExpiryMillis", String.valueOf(cacheExpiryMillis),
                         "fips140_2", "true",
-                        "tier", "Premium_HSM"
-                ))
+                        "tier", "Premium_HSM"))
                 .build());
     }
 
@@ -206,17 +208,17 @@ public class AzureKeyVaultProvider implements KeyProvider {
 
             // Uncomment when Azure SDK is available:
             /*
-            KeyVaultSecret secret = secretClient.getSecret(secretName);
-            String keyValue = secret.getValue();
-
-            // Decode Base64-encoded key
-            byte[] keyBytes = Base64.getDecoder().decode(keyValue);
-
-            log.info("✅ Retrieved key from Azure Key Vault (version: {})",
-                    secret.getProperties().getVersion());
-
-            return new SecretKeySpec(keyBytes, "AES");
-            */
+             * KeyVaultSecret secret = secretClient.getSecret(secretName);
+             * String keyValue = secret.getValue();
+             * 
+             * // Decode Base64-encoded key
+             * byte[] keyBytes = Base64.getDecoder().decode(keyValue);
+             * 
+             * log.info("✅ Retrieved key from Azure Key Vault (version: {})",
+             * secret.getProperties().getVersion());
+             * 
+             * return new SecretKeySpec(keyBytes, "AES");
+             */
 
             // Fallback for demo (generates a random key locally)
             log.warn("⚠️ Azure SDK not available - using local random key for demo");

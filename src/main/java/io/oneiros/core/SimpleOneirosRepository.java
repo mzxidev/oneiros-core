@@ -6,7 +6,6 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.oneiros.annotation.OneirosEncrypted;
 import io.oneiros.annotation.OneirosEntity;
-import io.oneiros.annotation.OneirosID;
 import io.oneiros.client.OneirosClient;
 import io.oneiros.config.OneirosProperties;
 import io.oneiros.security.CryptoService;
@@ -14,6 +13,7 @@ import io.oneiros.security.EncryptionType;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.util.function.Tuples;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
@@ -35,7 +35,8 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     private final IdGenerator idGenerator;
 
     @SuppressWarnings("unchecked")
-    public SimpleOneirosRepository(OneirosClient client, ObjectMapper mapper, CryptoService crypto, OneirosProperties properties) {
+    public SimpleOneirosRepository(OneirosClient client, ObjectMapper mapper, CryptoService crypto,
+            OneirosProperties properties) {
         this.client = client;
         this.mapper = mapper;
         this.crypto = crypto;
@@ -109,13 +110,18 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
                 }
             }
 
-            // 2. Encrypt IN PLACE (Daten für DB verschlüsseln)
-            processEncryption(entity, true);
-            return idVal.toString();
-        }).flatMap(id -> {
+            // 2. Encrypt a COPY of the entity (Do NOT mutate original)
+            T copyToSend = deepCopy(entity);
+            processEncryption(copyToSend, true);
+
+            // Return pair of copy and ID
+            return Tuples.of(copyToSend, idVal.toString());
+        }).flatMap(tuple -> {
+            T copyToSend = tuple.getT1();
+            String id = tuple.getT2();
             try {
-                // Serialize entity to JSON
-                String fullJson = mapper.writeValueAsString(entity);
+                // Serialize the encrypted copy to JSON
+                String fullJson = mapper.writeValueAsString(copyToSend);
 
                 // FIX #1: Remove "id" field from JSON to avoid conflict
                 // SurrealDB expects the ID not in CONTENT when it's already in the statement
@@ -124,14 +130,14 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
                 String jsonContent = jsonNode.toString();
 
                 // FIX #2: Convert ISO-8601 datetime strings to SurrealDB d"..." literals
-                // This is necessary because writeRawValue doesn't survive the readTree/toString roundtrip
+                // This is necessary because writeRawValue doesn't survive the readTree/toString
+                // roundtrip
                 jsonContent = convertDatetimesToSurrealFormat(jsonContent);
 
                 // "UPSERT user:123 CONTENT { ... } RETURN AFTER"
                 String sql = "UPSERT " + id + " CONTENT " + jsonContent + " RETURN AFTER";
 
-                // 3. Decrypt IN PLACE (Objekt für Java wieder lesbar machen)
-                processEncryption(entity, false);
+                // No need to decrypt in-place anymore, as we never mutated the original entity
 
                 return client.query(sql, entityType)
                         .next() // Nimm das erste Ergebnis
@@ -154,7 +160,8 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     @Override
     public Mono<T> findById(ID id) {
         String dbId = id.toString();
-        if (!dbId.contains(":")) dbId = tableName + ":" + dbId;
+        if (!dbId.contains(":"))
+            dbId = tableName + ":" + dbId;
         final String lookupId = dbId;
 
         // Wenn Cache aus ist, direkt zur DB
@@ -171,8 +178,7 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
                                 .doOnNext(entity -> {
                                     log.trace("🐢 Cache MISS for {} - loading from DB", lookupId);
                                     localCache.put(lookupId, entity);
-                                })
-                );
+                                }));
     }
 
     private Mono<T> fetchFromDb(String dbId) {
@@ -200,7 +206,8 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     @Override
     public Mono<Void> deleteById(ID id) {
         String dbId = id.toString();
-        if (!dbId.contains(":")) dbId = tableName + ":" + dbId;
+        if (!dbId.contains(":"))
+            dbId = tableName + ":" + dbId;
 
         // Cache Invalidation
         if (cacheEnabled && localCache != null) {
@@ -224,7 +231,7 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
      */
     private Field getIdField() {
         for (Field field : entityType.getDeclaredFields()) {
-            if (field.isAnnotationPresent(OneirosID.class)) { // <--- Prüfung auf Annotation
+            if (field.isAnnotationPresent(io.oneiros.annotation.OneirosID.class)) { // <--- Prüfung auf Annotation
                 return field;
             }
         }
@@ -237,11 +244,33 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     }
 
     /**
-     * Scannt alle Felder. Wenn @OneirosEncrypted gefunden wird -> Encrypt oder Decrypt.
-     * Unterstützt verschiedene Algorithmen: AES_GCM, ARGON2, BCRYPT, SCRYPT, SHA256, SHA512.
+     * Creates a shallow copy of the entity for safe encryption during save().
+     * This ensures the original reference is not mutated.
+     */
+    private T deepCopy(T entity) {
+        if (entity == null)
+            return null;
+        try {
+            T copy = (T) entityType.getDeclaredConstructor().newInstance();
+            for (Field field : entityType.getDeclaredFields()) {
+                field.setAccessible(true);
+                field.set(copy, field.get(entity));
+            }
+            return copy;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to copy entity for " + entityType.getSimpleName(), e);
+        }
+    }
+
+    /**
+     * Scannt alle Felder. Wenn @OneirosEncrypted gefunden wird -> Encrypt oder
+     * Decrypt.
+     * Unterstützt verschiedene Algorithmen: AES_GCM, ARGON2, BCRYPT, SCRYPT,
+     * SHA256, SHA512.
      */
     private void processEncryption(T entity, boolean encrypt) {
-        if (entity == null) return;
+        if (entity == null)
+            return;
 
         for (Field field : entityType.getDeclaredFields()) {
             if (field.isAnnotationPresent(OneirosEncrypted.class)) {
@@ -280,16 +309,19 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     /**
      * Converts ISO-8601 datetime strings to SurrealDB datetime literals.
      *
-     * <p>Example: "2024-01-01T00:00:00Z" becomes d"2024-01-01T00:00:00Z"
+     * <p>
+     * Example: "2024-01-01T00:00:00Z" becomes d"2024-01-01T00:00:00Z"
      *
-     * <p>This is necessary because Jackson's writeRawValue() doesn't survive
+     * <p>
+     * This is necessary because Jackson's writeRawValue() doesn't survive
      * the readTree/toString roundtrip that we use to remove the id field.
      *
-     * <p>Matches patterns like:
+     * <p>
+     * Matches patterns like:
      * <ul>
-     *   <li>"2024-01-01T00:00:00Z"</li>
-     *   <li>"2024-01-01T00:00:00.123Z"</li>
-     *   <li>"2024-01-01T00:00:00.123456789Z"</li>
+     * <li>"2024-01-01T00:00:00Z"</li>
+     * <li>"2024-01-01T00:00:00.123Z"</li>
+     * <li>"2024-01-01T00:00:00.123456789Z"</li>
      * </ul>
      *
      * @param json The JSON string with ISO-8601 datetime strings
@@ -299,8 +331,7 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
         // Regex to match ISO-8601 datetime strings in JSON
         // Pattern: "YYYY-MM-DDTHH:MM:SS" with optional fractional seconds and timezone
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-            "\"(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})?)\""
-        );
+                "\"(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:?\\d{2})?)\"");
 
         java.util.regex.Matcher matcher = pattern.matcher(json);
         StringBuilder sb = new StringBuilder();

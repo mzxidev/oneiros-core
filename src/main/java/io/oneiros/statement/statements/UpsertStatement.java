@@ -21,13 +21,13 @@ import java.util.Map;
  * - RETURN clauses
  *
  * <p><b>Example:</b>
- * <pre>
+ * <pre>{@code
  * UpsertStatement.table(User.class)
  *     .set("name", "Bob")
  *     .set("email", "bob@example.com")
- *     .where("email = 'bob@example.com'")
+ *     .where("email", "=", "bob@example.com")  // Parameterized!
  *     .execute(client);
- * </pre>
+ * }</pre>
  *
  * @param <T> the entity type
  * @since 1.0.0
@@ -116,33 +116,82 @@ public class UpsertStatement<T> implements Statement<T> {
     }
 
     /**
-     * Add WHERE condition.
+     * Adds a parameterized WHERE condition (SQL injection protected).
      *
-     * @param condition the condition expression
+     * <p>This is the recommended way to add WHERE conditions.
+     *
+     * @param field    the field name
+     * @param operator the comparison operator (=, !=, >, <, >=, <=, LIKE, IN)
+     * @param value    the value (will be parameterized)
      * @return this statement for chaining
      */
+    public UpsertStatement<T> where(String field, String operator, Object value) {
+        whereClause.addSafe(field, operator, value);
+        return this;
+    }
+
+    /**
+     * Adds a raw WHERE condition.
+     *
+     * <p><b>⚠️ DEPRECATED:</b> Use {@link #where(String, String, Object)} instead.
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #where(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpsertStatement<T> where(String condition) {
         whereClause.add(condition);
         return this;
     }
 
     /**
-     * Add AND condition.
+     * Adds a parameterized AND condition.
      *
-     * @param condition the condition expression
+     * @param field    the field name
+     * @param operator the comparison operator
+     * @param value    the value (will be parameterized)
      * @return this statement for chaining
      */
+    public UpsertStatement<T> and(String field, String operator, Object value) {
+        whereClause.andSafe(field, operator, value);
+        return this;
+    }
+
+    /**
+     * Adds a raw AND condition.
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #and(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpsertStatement<T> and(String condition) {
         whereClause.and(condition);
         return this;
     }
 
     /**
-     * Add OR condition.
+     * Adds a parameterized OR condition.
      *
-     * @param condition the condition expression
+     * @param field    the field name
+     * @param operator the comparison operator
+     * @param value    the value (will be parameterized)
      * @return this statement for chaining
      */
+    public UpsertStatement<T> or(String field, String operator, Object value) {
+        whereClause.orSafe(field, operator, value);
+        return this;
+    }
+
+    /**
+     * Adds a raw OR condition.
+     *
+     * @param condition the raw condition
+     * @return this statement for chaining
+     * @deprecated Use parameterized {@link #or(String, String, Object)} instead
+     */
+    @Deprecated(since = "0.4.5")
     public UpsertStatement<T> or(String condition) {
         whereClause.or(condition);
         return this;
@@ -265,11 +314,19 @@ public class UpsertStatement<T> implements Statement<T> {
 
     @Override
     public Flux<T> execute(OneirosClient client) {
-        return client.query(toSql(), type);
+        String sql = toSql();
+        if (whereClause.hasParameters()) {
+            return client.query(sql, whereClause.getParameters(), type);
+        }
+        return client.query(sql, type);
     }
 
     @Override
     public Mono<T> executeOne(OneirosClient client) {
+        String sql = toSql();
+        if (whereClause.hasParameters()) {
+            return client.query(sql, whereClause.getParameters(), type).next();
+        }
         return execute(client).next();
     }
 

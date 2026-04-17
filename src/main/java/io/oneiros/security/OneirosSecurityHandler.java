@@ -77,12 +77,14 @@ public class OneirosSecurityHandler {
     /**
      * Encrypts all @OneirosEncrypted fields in the entity before writing to database.
      *
-     * <p><b>Important:</b> This modifies the entity in-place for write operations.
-     * The SecureOneirosClient will handle returning decrypted results.
+     * <p><b>Note:</b> Returns a <em>deep copy</em> of the entity with encrypted fields.
+     * The original object passed by the caller is never modified, so it remains
+     * in plaintext in memory after this call.
      *
      * @param entity The entity to encrypt
      * @param <T> The entity type
-     * @return The entity with encrypted fields
+     * @return A copy of the entity with encrypted fields
+     * @throws EncryptionFailedException if copying or encrypting the entity fails
      */
     public <T> T encryptOnWrite(T entity) {
         if (!enabled || entity == null || cryptoService == null) {
@@ -90,12 +92,15 @@ public class OneirosSecurityHandler {
         }
 
         try {
+            // Deep-copy first so the caller's original object is never mutated
+            T copy = deepCopy(entity);
+
             // Process all fields with circular reference protection (identity-based)
             Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
-            processFields(entity, true, visited);
+            processFields(copy, true, visited);
 
-            log.debug("🔐 Encrypted entity: {}", entity.getClass().getSimpleName());
-            return entity;
+            log.debug("🔐 Encrypted entity: {}", copy.getClass().getSimpleName());
+            return copy;
 
         } catch (Exception e) {
             log.error("❌ Failed to encrypt entity: {}", e.getMessage(), e);

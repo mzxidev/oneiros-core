@@ -7,31 +7,32 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
-import java.util.Base64;
 
 /**
  * Utility for securely storing and encrypting credentials in memory.
  *
- * <p>This class provides better security than storing credentials as plain Strings:
+ * <p>
+ * This class provides better security than storing credentials as plain
+ * Strings:
  * <ul>
- *   <li>Uses char[] instead of String to allow explicit clearing</li>
- *   <li>Encrypts credentials in memory when not in use</li>
- *   <li>Provides automatic cleanup on finalization</li>
- *   <li>Reduces exposure window for credential theft</li>
+ * <li>Uses char[] instead of String to allow explicit clearing</li>
+ * <li>Encrypts credentials in memory when not in use</li>
+ * <li>Provides automatic cleanup on finalization</li>
+ * <li>Reduces exposure window for credential theft</li>
  * </ul>
  *
  * <h3>Security Benefits</h3>
  * <ul>
- *   <li>Credentials are encrypted when stored</li>
- *   <li>Decrypted only when needed (minimal exposure)</li>
- *   <li>Memory is explicitly cleared after use</li>
- *   <li>Not visible in heap dumps in encrypted form</li>
+ * <li>Credentials are encrypted when stored</li>
+ * <li>Decrypted only when needed (minimal exposure)</li>
+ * <li>Memory is explicitly cleared after use</li>
+ * <li>Not visible in heap dumps in encrypted form</li>
  * </ul>
  *
  * <h3>Usage Example</h3>
+ * 
  * <pre>{@code
  * // Store credentials securely
  * SecureCredentials creds = SecureCredentials.from("my-password");
@@ -93,7 +94,8 @@ public class SecureCredentials implements AutoCloseable {
     /**
      * Creates secure credentials from a plaintext string.
      *
-     * <p>The input string is immediately cleared from memory after encryption.
+     * <p>
+     * The input string is immediately cleared from memory after encryption.
      *
      * @param plaintext the plaintext credential
      * @return encrypted secure credentials
@@ -111,7 +113,8 @@ public class SecureCredentials implements AutoCloseable {
     /**
      * Creates secure credentials from a char array.
      *
-     * <p>The input array is cleared after encryption.
+     * <p>
+     * The input array is cleared after encryption.
      *
      * @param plaintext the plaintext credential as char array
      * @return encrypted secure credentials
@@ -126,10 +129,13 @@ public class SecureCredentials implements AutoCloseable {
     /**
      * Retrieves the plaintext credential.
      *
-     * <p><strong>Important:</strong> The returned char array must be explicitly
+     * <p>
+     * <strong>Important:</strong> The returned char array must be explicitly
      * cleared after use by calling {@code Arrays.fill(chars, '\0')}.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>{@code
      * char[] password = creds.getPlaintext();
      * try {
@@ -175,7 +181,8 @@ public class SecureCredentials implements AutoCloseable {
     /**
      * Clears all sensitive data from memory.
      *
-     * <p>After calling this method, the credentials cannot be recovered.
+     * <p>
+     * After calling this method, the credentials cannot be recovered.
      */
     public void clear() {
         if (!cleared) {

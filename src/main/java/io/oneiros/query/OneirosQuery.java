@@ -2,11 +2,11 @@ package io.oneiros.query;
 
 import io.oneiros.annotation.OneirosEntity;
 import io.oneiros.client.OneirosClient;
-import io.oneiros.statement.Statement;
 import io.oneiros.statement.statements.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -14,48 +14,53 @@ import java.util.List;
 /**
  * Advanced Query Builder with integrated Statement API.
  *
- * <p>Provides two ways to build queries:
+ * <p>
+ * Provides two ways to build queries:
  * <ul>
- *   <li><b>Fluent Query API</b> - Simple, chainable methods for common queries</li>
- *   <li><b>Statement API</b> - Full SurrealQL statement access via static methods</li>
+ * <li><b>Fluent Query API</b> - Simple, chainable methods for common
+ * queries</li>
+ * <li><b>Statement API</b> - Full SurrealQL statement access via static
+ * methods</li>
  * </ul>
  *
  * <h3>Fluent API Examples:</h3>
+ * 
  * <pre>
  * // Simple SELECT
  * OneirosQuery.select(User.class)
- *     .where("age").gte(18)
- *     .orderBy("name")
- *     .limit(10)
- *     .execute(client);
+ *         .where("age").gte(18)
+ *         .orderBy("name")
+ *         .limit(10)
+ *         .execute(client);
  *
  * // With FETCH and OMIT
  * OneirosQuery.select(User.class)
- *     .where("verified").is(true)
- *     .omit("password")
- *     .fetch("profile", "permissions")
- *     .execute(client);
+ *         .where("verified").is(true)
+ *         .omit("password")
+ *         .fetch("profile", "permissions")
+ *         .execute(client);
  * </pre>
  *
  * <h3>Statement API Examples:</h3>
+ * 
  * <pre>
  * // CREATE
  * OneirosQuery.create(User.class)
- *     .set("name", "Alice")
- *     .set("email", "alice@example.com")
- *     .execute(client);
+ *         .set("name", "Alice")
+ *         .set("email", "alice@example.com")
+ *         .execute(client);
  *
  * // UPDATE
  * OneirosQuery.update(User.class)
- *     .set("verified", true)
- *     .where("id = user:alice")
- *     .execute(client);
+ *         .set("verified", true)
+ *         .where("id = user:alice")
+ *         .execute(client);
  *
  * // TRANSACTION
  * OneirosQuery.transaction()
- *     .add(OneirosQuery.create(User.class).set("name", "Bob"))
- *     .add(OneirosQuery.update(Account.class).setRaw("balance += 100"))
- *     .commit(client);
+ *         .add(OneirosQuery.create(User.class).set("name", "Bob"))
+ *         .add(OneirosQuery.update(Account.class).setRaw("balance += 100"))
+ *         .commit(client);
  * </pre>
  */
 public class OneirosQuery<T> {
@@ -71,6 +76,7 @@ public class OneirosQuery<T> {
     private String offsetClause = "";
     private String orderByClause = "";
     private String timeoutClause = "";
+    private String versionClause = "";
     private boolean parallelEnabled = false;
 
     private String currentField;
@@ -130,7 +136,8 @@ public class OneirosQuery<T> {
     public OneirosQuery<T> in(Object... values) {
         StringBuilder inClause = new StringBuilder(" IN [");
         for (int i = 0; i < values.length; i++) {
-            if (i > 0) inClause.append(", ");
+            if (i > 0)
+                inClause.append(", ");
             inClause.append(formatValue(values[i]));
         }
         inClause.append("]");
@@ -167,7 +174,8 @@ public class OneirosQuery<T> {
     }
 
     private void addCondition(String operatorAndValue) {
-        if (currentField == null) throw new IllegalStateException("Call .where() before adding a condition!");
+        if (currentField == null)
+            throw new IllegalStateException("Call .where() before adding a condition!");
         whereClauses.add(currentField + operatorAndValue);
         currentField = null;
     }
@@ -229,6 +237,20 @@ public class OneirosQuery<T> {
         return this;
     }
 
+    /**
+     * Enables Time-Travel-Debugging for this query.
+     * Selects data as it existed at the specified point in time.
+     * 
+     * @param timestamp the point in time
+     * @return this query builder
+     */
+    public OneirosQuery<T> at(Instant timestamp) {
+        if (timestamp != null) {
+            this.versionClause = " VERSION d'" + timestamp.toString() + "'";
+        }
+        return this;
+    }
+
     public OneirosQuery<T> orderBy(String field) {
         this.orderByClause = " ORDER BY " + field + " ASC";
         return this;
@@ -262,7 +284,7 @@ public class OneirosQuery<T> {
      * Builds the complete SQL string in the correct SurrealQL syntax order.
      * <p>
      * Order: SELECT * [OMIT fields] FROM table [WHERE conditions] [ORDER BY]
-     *        [LIMIT] [START] [FETCH fields] [TIMEOUT duration] [PARALLEL]
+     * [LIMIT] [START] [FETCH fields] [TIMEOUT duration] [PARALLEL]
      */
     private String buildSql() {
         StringBuilder sql = new StringBuilder("SELECT * ");
@@ -275,6 +297,11 @@ public class OneirosQuery<T> {
         }
 
         sql.append("FROM ").append(tableName);
+
+        // VERSION (Time-Travel)
+        if (!versionClause.isEmpty()) {
+            sql.append(versionClause);
+        }
 
         // WHERE clause
         if (!whereClauses.isEmpty()) {
@@ -324,28 +351,33 @@ public class OneirosQuery<T> {
     }
 
     private String formatValue(Object val) {
-        if (val == null) return "NONE";
-        if (val instanceof Number) return val.toString();
-        if (val instanceof Boolean) return val.toString();
+        if (val == null)
+            return "NONE";
+        if (val instanceof Number)
+            return val.toString();
+        if (val instanceof Boolean)
+            return val.toString();
         // Comprehensive escaping to prevent SQL injection
         return "'" + escapeString(val.toString()) + "'";
     }
 
     /**
      * Escapes special characters in a string to prevent SQL injection.
+     * 
      * @param value the string to escape
      * @return the escaped string
      */
     private String escapeString(String value) {
-        if (value == null) return "";
+        if (value == null)
+            return "";
         return value
-            .replace("\\", "\\\\")  // Backslash first!
-            .replace("'", "\\'")    // Single quotes
-            .replace("\"", "\\\"")  // Double quotes
-            .replace("\n", "\\n")   // Newlines
-            .replace("\r", "\\r")   // Carriage returns
-            .replace("\t", "\\t")   // Tabs
-            .replace("\0", "");     // Remove null bytes
+                .replace("\\", "\\\\") // Backslash first!
+                .replace("'", "\\'") // Single quotes
+                .replace("\"", "\\\"") // Double quotes
+                .replace("\n", "\\n") // Newlines
+                .replace("\r", "\\r") // Carriage returns
+                .replace("\t", "\\t") // Tabs
+                .replace("\0", ""); // Remove null bytes
     }
 
     // ==================================================================================
@@ -355,7 +387,8 @@ public class OneirosQuery<T> {
     /**
      * <h2>Statement API - Direct access to all SurrealQL statements</h2>
      *
-     * <p>These methods provide seamless integration between the fluent query builder
+     * <p>
+     * These methods provide seamless integration between the fluent query builder
      * and the complete Statement API, allowing you to combine both approaches.
      */
 
@@ -364,12 +397,14 @@ public class OneirosQuery<T> {
     /**
      * Create a new CREATE statement for a table.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.create(User.class)
-     *     .set("name", "Alice")
-     *     .set("email", "alice@example.com")
-     *     .execute(client);
+     *         .set("name", "Alice")
+     *         .set("email", "alice@example.com")
+     *         .execute(client);
      * </pre>
      *
      * @param type the entity class
@@ -382,11 +417,13 @@ public class OneirosQuery<T> {
     /**
      * Create a new CREATE statement for a specific record ID.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.create(User.class, "alice")
-     *     .set("name", "Alice")
-     *     .execute(client);
+     *         .set("name", "Alice")
+     *         .execute(client);
      * </pre>
      */
     public static <T> CreateStatement<T> create(Class<T> type, String id) {
@@ -398,12 +435,14 @@ public class OneirosQuery<T> {
     /**
      * Create a new UPDATE statement for a table.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.update(User.class)
-     *     .set("verified", true)
-     *     .where("age >= 18")
-     *     .execute(client);
+     *         .set("verified", true)
+     *         .where("age >= 18")
+     *         .execute(client);
      * </pre>
      */
     public static <T> UpdateStatement<T> update(Class<T> type) {
@@ -413,11 +452,13 @@ public class OneirosQuery<T> {
     /**
      * Create a new UPDATE statement for a specific record ID.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.update(User.class, "user:alice")
-     *     .set("verified", true)
-     *     .execute(client);
+     *         .set("verified", true)
+     *         .execute(client);
      * </pre>
      */
     public static <T> UpdateStatement<T> update(Class<T> type, String id) {
@@ -429,11 +470,13 @@ public class OneirosQuery<T> {
     /**
      * Create a new DELETE statement for a table.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.delete(User.class)
-     *     .where("age < 18")
-     *     .execute(client);
+     *         .where("age < 18")
+     *         .execute(client);
      * </pre>
      */
     public static <T> DeleteStatement<T> delete(Class<T> type) {
@@ -443,10 +486,12 @@ public class OneirosQuery<T> {
     /**
      * Create a new DELETE statement for a specific record ID.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.delete(User.class, "user:bob")
-     *     .execute(client);
+     *         .execute(client);
      * </pre>
      */
     public static <T> DeleteStatement<T> delete(Class<T> type, String id) {
@@ -458,13 +503,15 @@ public class OneirosQuery<T> {
     /**
      * Create a new UPSERT statement (insert-or-update).
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.upsert(User.class)
-     *     .set("name", "Bob")
-     *     .set("email", "bob@example.com")
-     *     .where("email = 'bob@example.com'")
-     *     .execute(client);
+     *         .set("name", "Bob")
+     *         .set("email", "bob@example.com")
+     *         .where("email = 'bob@example.com'")
+     *         .execute(client);
      * </pre>
      */
     public static <T> UpsertStatement<T> upsert(Class<T> type) {
@@ -483,15 +530,17 @@ public class OneirosQuery<T> {
     /**
      * Create a new INSERT statement.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.insert(User.class)
-     *     .fields("name", "email")
-     *     .values("Charlie", "charlie@example.com")
-     *     .onDuplicateKeyUpdate()
+     *         .fields("name", "email")
+     *         .values("Charlie", "charlie@example.com")
+     *         .onDuplicateKeyUpdate()
      *         .set("updated_at", "time::now()")
-     *     .end()
-     *     .execute(client);
+     *         .end()
+     *         .execute(client);
      * </pre>
      */
     public static <T> InsertStatement<T> insert(Class<T> type) {
@@ -503,13 +552,15 @@ public class OneirosQuery<T> {
     /**
      * Create a new RELATE statement for graph relationships.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.relate("person:alice")
-     *     .to("person:bob")
-     *     .via("knows")
-     *     .set("since", "2020-01-01")
-     *     .execute(client);
+     *         .to("person:bob")
+     *         .via("knows")
+     *         .set("since", "2020-01-01")
+     *         .execute(client);
      * </pre>
      */
     public static RelateStatement relate(String from) {
@@ -521,14 +572,16 @@ public class OneirosQuery<T> {
     /**
      * Create a new transaction.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.transaction()
-     *     .add(OneirosQuery.create(User.class).set("name", "Test"))
-     *     .add(OneirosQuery.update(Account.class)
-     *         .setRaw("balance -= 100")
-     *         .where("user_id = user:test"))
-     *     .commit(client);
+     *         .add(OneirosQuery.create(User.class).set("name", "Test"))
+     *         .add(OneirosQuery.update(Account.class)
+     *                 .setRaw("balance -= 100")
+     *                 .where("user_id = user:test"))
+     *         .commit(client);
      * </pre>
      */
     public static TransactionStatement transaction() {
@@ -540,15 +593,17 @@ public class OneirosQuery<T> {
     /**
      * Create a new IF statement for conditional logic.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.ifCondition("user.role = 'ADMIN'")
-     *     .then(OneirosQuery.update(User.class)
-     *         .set("permissions", "full"))
-     *     .elseBlock()
-     *     .then(OneirosQuery.throwError("Access denied"))
-     *     .build()
-     *     .execute(client);
+     *         .then(OneirosQuery.update(User.class)
+     *                 .set("permissions", "full"))
+     *         .elseBlock()
+     *         .then(OneirosQuery.throwError("Access denied"))
+     *         .build()
+     *         .execute(client);
      * </pre>
      */
     public static IfStatement ifCondition(String condition) {
@@ -560,12 +615,14 @@ public class OneirosQuery<T> {
     /**
      * Create a new FOR loop statement.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.forEach("$person", "(SELECT * FROM person WHERE age > 18)")
-     *     .add(OneirosQuery.update(User.class, "$person.id")
-     *         .set("can_vote", true))
-     *     .execute(client);
+     *         .add(OneirosQuery.update(User.class, "$person.id")
+     *                 .set("can_vote", true))
+     *         .execute(client);
      * </pre>
      */
     public static ForStatement forEach(String variable, String iterable) {
@@ -577,7 +634,9 @@ public class OneirosQuery<T> {
     /**
      * Create a new LET statement for variable assignment.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.let("user_id", "user:alice")
      * </pre>
@@ -591,7 +650,9 @@ public class OneirosQuery<T> {
     /**
      * Create a THROW statement for error handling.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.throwError("Insufficient funds")
      * </pre>
@@ -603,7 +664,9 @@ public class OneirosQuery<T> {
     /**
      * Create a RETURN statement.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.returnValue("{ success: true }")
      * </pre>
@@ -615,7 +678,9 @@ public class OneirosQuery<T> {
     /**
      * Create a SLEEP statement.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * OneirosQuery.sleep("5s").execute(client)
      * </pre>
@@ -645,17 +710,21 @@ public class OneirosQuery<T> {
     /**
      * Convert this query builder into a SelectStatement for composition.
      *
-     * <p>Allows using the fluent query builder inside transactions and other statements.
+     * <p>
+     * Allows using the fluent query builder inside transactions and other
+     * statements.
      *
-     * <p>Example:
+     * <p>
+     * Example:
+     * 
      * <pre>
      * var userQuery = OneirosQuery.select(User.class)
-     *     .where("age").gte(18)
-     *     .asStatement();
+     *         .where("age").gte(18)
+     *         .asStatement();
      *
      * OneirosQuery.transaction()
-     *     .add(userQuery)
-     *     .commit(client);
+     *         .add(userQuery)
+     *         .commit(client);
      * </pre>
      */
     public SelectStatement<T> asStatement() {
@@ -768,11 +837,10 @@ public class OneirosQuery<T> {
     /**
      * Convenience method: execute as a Statement.
      *
-     * <p>Internally converts to SelectStatement and executes.
+     * <p>
+     * Internally converts to SelectStatement and executes.
      */
     public Flux<T> executeAsStatement(OneirosClient client) {
         return asStatement().execute(client);
     }
 }
-
-

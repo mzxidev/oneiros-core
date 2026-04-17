@@ -43,13 +43,16 @@ public class InMemoryKeyProvider implements KeyProvider {
     /**
      * Creates an in-memory key provider from a password/passphrase.
      *
-     * @param keyString the password or passphrase (minimum 8 characters)
+     * @param keyString the password or passphrase (minimum 14 characters, per NIST SP 800-63B)
      * @throws KeyProviderException if key derivation fails
      */
     public InMemoryKeyProvider(String keyString) {
-        if (keyString == null || keyString.length() < 8) {
+        if (keyString == null || keyString.length() < 14) {
             throw new KeyProviderException("IN_MEMORY", "key_derivation",
-                    "Key must be at least 8 characters");
+                    "Key must be at least 14 characters (NIST SP 800-63B)");
+        }
+        if (keyString.length() < 20) {
+            log.warn("⚠️ Passphrase is shorter than 20 characters. Consider using a longer passphrase for better security.");
         }
 
         try {
@@ -103,10 +106,8 @@ public class InMemoryKeyProvider implements KeyProvider {
      */
     private SecretKey deriveKey(String password) throws NoSuchAlgorithmException {
         try {
-            // Use PBKDF2 for secure key derivation (OWASP recommended)
-            // Salt is derived from a constant (not ideal for rotation, but better than no salt)
-            // For production: Use a properly stored/rotated salt
-            byte[] salt = "oneiros-kdf-salt-v1".getBytes(StandardCharsets.UTF_8);
+            // K1 FIX: Secure randomly generated and persistent salt instead of static string
+            byte[] salt = SaltManager.getOrCreateSalt();
 
             javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(
                 password.toCharArray(),

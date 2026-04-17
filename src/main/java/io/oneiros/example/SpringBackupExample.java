@@ -1,7 +1,6 @@
 package io.oneiros.example;
 
 import io.oneiros.backup.OneirosBackupManager;
-import io.oneiros.backup.OneirosBackupManager.BackupStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -11,21 +10,23 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
  * Example: Using Oneiros Backup System with Spring Boot.
  *
- * <p>This example demonstrates:
+ * <p>
+ * This example demonstrates:
  * <ul>
- *   <li>Auto-configured backup manager via Spring Boot</li>
- *   <li>Manual backup creation</li>
- *   <li>Backup statistics retrieval</li>
- *   <li>Backup restoration</li>
+ * <li>Auto-configured backup manager via Spring Boot</li>
+ * <li>Manual backup creation</li>
+ * <li>Backup statistics retrieval</li>
+ * <li>Backup restoration</li>
  * </ul>
  *
- * <p>Configuration in application.yml:
+ * <p>
+ * Configuration in application.yml:
+ * 
  * <pre>
  * oneiros:
  *   url: ws://localhost:8000/rpc
@@ -67,13 +68,13 @@ public class SpringBackupExample {
 
             // Example 1: Create a backup
             createBackup()
-                // Example 2: Get backup statistics
-                .flatMap(this::getBackupStats)
-                // Example 3: Optional - Restore backup
-                // .flatMap(backup -> restoreBackup(backup, false))
-                .doOnSuccess(v -> log.info("✅ Backup example completed!"))
-                .doOnError(e -> log.error("❌ Backup example failed", e))
-                .block();
+                    // Example 2: Get backup statistics
+                    .flatMap(this::getBackupStats)
+                    // Example 3: Optional - Restore backup
+                    // .flatMap(backup -> restoreBackup(backup, false))
+                    .doOnSuccess(v -> log.info("✅ Backup example completed!"))
+                    .doOnError(e -> log.error("❌ Backup example failed", e))
+                    .block();
         }
 
         /**
@@ -83,10 +84,10 @@ public class SpringBackupExample {
             log.info("📦 Creating backup...");
 
             return backupManager.createBackup(Paths.get("./backups"))
-                .doOnSuccess(backup -> {
-                    log.info("✅ Backup created: {}", backup.getName());
-                    log.info("   Size: {} KB", backup.length() / 1024);
-                });
+                    .doOnSuccess(backup -> {
+                        log.info("✅ Backup created: {}", backup.getName());
+                        log.info("   Size: {} KB", backup.length() / 1024);
+                    });
         }
 
         /**
@@ -96,29 +97,28 @@ public class SpringBackupExample {
             log.info("📊 Retrieving backup statistics...");
 
             return backupManager.getBackupStats(backup)
-                .doOnSuccess(stats -> {
-                    log.info("✅ Backup Statistics:");
-                    log.info("   Filename: {}", stats.filename());
-                    log.info("   Size: {} KB ({} MB)", stats.sizeKB(), stats.sizeMB());
-                    log.info("   Timestamp: {}", stats.timestamp());
-                    log.info("   Namespace: {}", stats.namespace());
-                    log.info("   Database: {}", stats.database());
-                })
-                .thenReturn(backup);
+                    .doOnSuccess(stats -> {
+                        log.info("✅ Backup Statistics:");
+                        log.info("   Filename: {}", stats.filename());
+                        log.info("   Size: {} KB ({} MB)", stats.sizeKB(), stats.sizeMB());
+                        log.info("   Timestamp: {}", stats.timestamp());
+                        log.info("   Namespace: {}", stats.namespace());
+                        log.info("   Database: {}", stats.database());
+                    })
+                    .thenReturn(backup);
         }
 
         /**
          * Restore a backup.
          *
-         * @param backup The backup file to restore
+         * @param backup       The backup file to restore
          * @param dropExisting Whether to drop existing tables before restore
          */
         private Mono<Void> restoreBackup(File backup, boolean dropExisting) {
             log.info("📥 Restoring backup: {} (dropExisting={})", backup.getName(), dropExisting);
 
             return backupManager.restoreBackup(backup, dropExisting)
-                .doOnSuccess(v -> log.info("✅ Backup restored successfully!"));
+                    .doOnSuccess(v -> log.info("✅ Backup restored successfully!"));
         }
     }
 }
-

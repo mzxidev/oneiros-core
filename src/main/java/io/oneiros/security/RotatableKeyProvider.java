@@ -6,9 +6,7 @@ import org.slf4j.LoggerFactory;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,21 +16,24 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Key provider that supports key rotation with backward compatibility.
  *
- * <p>This provider maintains multiple key versions:
+ * <p>
+ * This provider maintains multiple key versions:
  * <ul>
- *   <li><strong>Current Key:</strong> Used for all new encryption operations</li>
- *   <li><strong>Previous Keys:</strong> Kept for decrypting data encrypted with old keys</li>
+ * <li><strong>Current Key:</strong> Used for all new encryption operations</li>
+ * <li><strong>Previous Keys:</strong> Kept for decrypting data encrypted with
+ * old keys</li>
  * </ul>
  *
  * <h3>Key Rotation Process</h3>
  * <ol>
- *   <li>Generate new key version</li>
- *   <li>Set as current encryption key</li>
- *   <li>Keep old keys for decryption (configurable retention)</li>
- *   <li>Re-encrypt data gradually (background process recommended)</li>
+ * <li>Generate new key version</li>
+ * <li>Set as current encryption key</li>
+ * <li>Keep old keys for decryption (configurable retention)</li>
+ * <li>Re-encrypt data gradually (background process recommended)</li>
  * </ol>
  *
  * <h3>Usage Example</h3>
+ * 
  * <pre>{@code
  * RotatableKeyProvider provider = new RotatableKeyProvider("initial-key");
  *
@@ -73,7 +74,7 @@ public class RotatableKeyProvider implements KeyProvider {
     private final AtomicReference<VersionedKey> currentVersionedKey;
     private final Map<Integer, SecretKey> keyHistory = new ConcurrentHashMap<>();
     private final AtomicInteger versionCounter = new AtomicInteger(1);
-    private final int maxKeyHistorySize;
+    private final AtomicInteger maxKeyHistorySize = new AtomicInteger(3);
 
     /**
      * Creates a rotatable key provider with default history size (3 previous keys).
@@ -87,8 +88,9 @@ public class RotatableKeyProvider implements KeyProvider {
     /**
      * Creates a rotatable key provider with custom history size.
      *
-     * @param initialKey the initial encryption key
-     * @param maxKeyHistorySize maximum number of old keys to retain (recommended: 3-5)
+     * @param initialKey        the initial encryption key
+     * @param maxKeyHistorySize maximum number of old keys to retain (recommended:
+     *                          3-5)
      */
     public RotatableKeyProvider(String initialKey, int maxKeyHistorySize) {
         if (initialKey == null || initialKey.length() < 8) {
@@ -100,7 +102,7 @@ public class RotatableKeyProvider implements KeyProvider {
                     "maxKeyHistorySize must be at least 1");
         }
 
-        this.maxKeyHistorySize = maxKeyHistorySize;
+        this.maxKeyHistorySize.set(maxKeyHistorySize);
 
         try {
             SecretKey initialSecretKey = deriveKey(initialKey);
@@ -137,10 +139,12 @@ public class RotatableKeyProvider implements KeyProvider {
     /**
      * Rotates to a new key version.
      *
-     * <p>The old key is retained for decryption according to the history size policy.
+     * <p>
+     * The old key is retained for decryption according to the history size policy.
      * After rotation, all new encryption operations will use the new key.
      *
-     * <p><strong>Important:</strong> After rotating keys, you should re-encrypt
+     * <p>
+     * <strong>Important:</strong> After rotating keys, you should re-encrypt
      * existing sensitive data in the background to use the new key.
      *
      * @throws KeyProviderException if rotation fails
@@ -175,12 +179,17 @@ public class RotatableKeyProvider implements KeyProvider {
 
             // SECURITY FIX: Atomically update key + version together
             currentVersionedKey.set(new VersionedKey(newSecretKey, newVersion));
+            
+            // Note: In a production environment, 'newKey' String should be wiped from memory.
+            // Since Strings are immutable in Java, we recommend using char[] and 
+            // overwriting it with 0s after SecretKey derivation.
 
             // Cleanup old keys if history is too large
-            if (keyHistory.size() > maxKeyHistorySize) {
-                int oldestVersion = newVersion - maxKeyHistorySize;
+            int maxHistory = maxKeyHistorySize.get();
+            if (keyHistory.size() > maxHistory) {
+                int oldestVersion = newVersion - maxHistory + 1;
                 keyHistory.entrySet().removeIf(entry -> entry.getKey() < oldestVersion);
-                log.debug("🗑️ Removed old key versions (keeping last {})", maxKeyHistorySize);
+                log.debug("🗑️ Removed old key versions (keeping last {})", maxHistory);
             }
 
             log.info("🔄 Key rotated: v{} -> v{} (history size: {})",
@@ -195,7 +204,9 @@ public class RotatableKeyProvider implements KeyProvider {
     /**
      * Retrieves a specific key version for decryption.
      *
-     * <p>This method allows decrypting data that was encrypted with an older key version.
+     * <p>
+     * This method allows decrypting data that was encrypted with an older key
+     * version.
      *
      * @param version the key version to retrieve
      * @return the secret key for that version, or null if not available
@@ -218,6 +229,34 @@ public class RotatableKeyProvider implements KeyProvider {
     }
 
     /**
+     * Sets the maximum number of historical keys to retain.
+     * 
+     * @param size the new maximum history size (must be >= 1)
+     */
+    public void setMaxKeyHistorySize(int size) {
+        if (size < 1)
+            return;
+        this.maxKeyHistorySize.set(size);
+
+        // Trigger immediate cleanup if needed
+        int currentSize = keyHistory.size();
+        if (currentSize > size) {
+            int currentVersion = versionCounter.get();
+            int oldestVersion = currentVersion - size + 1;
+            keyHistory.entrySet().removeIf(entry -> entry.getKey() < oldestVersion);
+            log.info("🗑️ Adjusted history size: kept last {} versions", size);
+        }
+    }
+
+    /**
+     * Gets the current maximum history size.
+     */
+    public int getMaxKeyHistorySize() {
+        return maxKeyHistorySize.get();
+    }
+
+
+    /**
      * Returns all available key versions.
      */
     public java.util.Set<Integer> getAvailableVersions() {
@@ -236,8 +275,7 @@ public class RotatableKeyProvider implements KeyProvider {
                         "currentVersion", String.valueOf(current.version),
                         "historySize", String.valueOf(keyHistory.size()),
                         "maxHistorySize", String.valueOf(maxKeyHistorySize),
-                        "availableVersions", keyHistory.keySet().toString()
-                ))
+                        "availableVersions", keyHistory.keySet().toString()))
                 .build());
     }
 
@@ -246,14 +284,14 @@ public class RotatableKeyProvider implements KeyProvider {
      */
     private SecretKey deriveKey(String password) throws NoSuchAlgorithmException {
         try {
-            // Use PBKDF2 for secure key derivation
-            byte[] salt = "oneiros-kdf-salt-v1".getBytes(StandardCharsets.UTF_8);
+            // K1 FIX: Secure randomly generated and persistent salt instead of static string
+            byte[] salt = SaltManager.getOrCreateSalt();
 
             javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(
                     password.toCharArray(),
                     salt,
                     310000, // OWASP recommendation: 310,000 iterations
-                    256     // 256-bit key for AES-256
+                    256 // 256-bit key for AES-256
             );
 
             javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");

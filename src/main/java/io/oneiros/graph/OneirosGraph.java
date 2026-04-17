@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import io.oneiros.migration.SqlInjectionPrevention;
 import java.lang.reflect.Field;
 import java.util.HashMap;
 import java.util.Map;
@@ -233,6 +234,11 @@ public class OneirosGraph {
         if (edgeTable == null || edgeTable.isEmpty()) {
             throw new IllegalStateException("Edge table not set. Use .via()");
         }
+
+        // SECURITY: Validate inputs to prevent SQL injection
+        SqlInjectionPrevention.validateRecordId(fromRecord);
+        SqlInjectionPrevention.validateRecordId(toRecord);
+        SqlInjectionPrevention.validateTableName(edgeTable);
 
         StringBuilder sql = new StringBuilder();
         sql.append("RELATE ");

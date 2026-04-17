@@ -8,6 +8,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -51,6 +52,7 @@ public class SelectStatement<T> implements Statement<T> {
     private TimeoutClause timeoutClause;
     private ParallelClause parallelClause;
     private ExplainClause explainClause;
+    private VersionClause versionClause;
 
     // Projection
     private String projection = "*";
@@ -255,6 +257,18 @@ public class SelectStatement<T> implements Statement<T> {
         return this;
     }
 
+    /**
+     * Enables Time-Travel-Debugging for this query.
+     * Selects data as it existed at the specified point in time.
+     * 
+     * @param timestamp the point in time
+     * @return this statement for chaining
+     */
+    public SelectStatement<T> at(Instant timestamp) {
+        this.versionClause = new VersionClause(timestamp);
+        return this;
+    }
+
     // --- LIMIT Clause ---
 
     public SelectStatement<T> limit(int limit) {
@@ -341,6 +355,11 @@ public class SelectStatement<T> implements Statement<T> {
 
         // FROM
         sql.append(" FROM ").append(tableName);
+
+        // VERSION (Time-Travel)
+        if (versionClause != null) {
+            sql.append(versionClause.toSql());
+        }
 
         // WHERE
         if (!whereClause.isEmpty()) {

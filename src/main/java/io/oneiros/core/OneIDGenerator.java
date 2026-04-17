@@ -2,7 +2,6 @@ package io.oneiros.core;
 
 import java.security.SecureRandom;
 import java.time.Instant;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class OneIDGenerator implements IdGenerator {
@@ -23,12 +22,15 @@ public class OneIDGenerator implements IdGenerator {
     public String generate() {
         // 1. Hole aktuellen Timestamp (Monotonicity Check)
         long now = System.currentTimeMillis();
-        synchronized (this) {
+        
+        // SECURITY FIX (Performance): Iterative CAS loop instead of synchronized block
+        while (true) {
             long last = lastTimestamp.get();
-            if (now <= last) {
-                now = last + 1; // Clock moved back or too fast? Increment anyway.
+            long nextTime = Math.max(now, last + 1); // Clock moved back or too fast? Increment anyway.
+            if (lastTimestamp.compareAndSet(last, nextTime)) {
+                now = nextTime;
+                break;
             }
-            lastTimestamp.set(now);
         }
 
         StringBuilder sb = new StringBuilder(TIME_CHARS + RANDOM_CHARS);

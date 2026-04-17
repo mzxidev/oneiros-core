@@ -144,18 +144,29 @@ public class OneirosSearch<T> {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT *");
 
+        // search::score(n) references the @n@ predicate in the WHERE clause
         if (scoring) {
             sql.append(", search::score(1) AS relevance");
         }
 
+        // search::highlight references the same @n@ predicate; one entry per searched field
+        if (highlights && fields != null && fields.length > 0) {
+            for (String field : fields) {
+                sql.append(", search::highlight('<mark>', '</mark>', 1) AS ")
+                   .append(field)
+                   .append("_highlight");
+            }
+        }
+
         sql.append(" FROM ").append(tableName);
 
+        // Use numbered predicate @1@ so search::score(1) and search::highlight(...,1) resolve correctly
         if (fields != null && fields.length > 0 && query != null) {
             sql.append(" WHERE ");
 
             for (int i = 0; i < fields.length; i++) {
                 if (i > 0) sql.append(" OR ");
-                sql.append(fields[i]).append(" @@ '").append(escapeQuery(query)).append("'");
+                sql.append(fields[i]).append(" @1@ '").append(escapeQuery(query)).append("'");
             }
 
             if (minScore > 0) {
@@ -178,9 +189,10 @@ public class OneirosSearch<T> {
 
     /**
      * Escapes special characters in search query.
+     * SECURITY: Uses central escaping to prevent SQL injection.
      */
     private String escapeQuery(String query) {
         if (query == null) return "";
-        return query.replace("'", "\\'");
+        return io.oneiros.migration.SqlInjectionPrevention.escapeStringValue(query);
     }
 }

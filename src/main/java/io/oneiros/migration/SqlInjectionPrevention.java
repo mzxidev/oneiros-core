@@ -65,11 +65,37 @@ public class SqlInjectionPrevention {
         return value
                 .replace("\\", "\\\\")  // Backslash must be first
                 .replace("'", "\\'")     // Single quote
+                .replace("\"", "\\\"")   // Double quote
                 .replace("\n", "\\n")    // Newline
                 .replace("\r", "\\r")    // Carriage return
                 .replace("\t", "\\t")    // Tab
                 .replace("\0", "")       // Null byte (remove)
                 ;
+    }
+
+    /**
+     * Validates that a record ID matches the expected format: table:id
+     * Prevents SQL injection via record ID fields in RELATE statements.
+     *
+     * <p>Valid formats:
+     * <ul>
+     *   <li>user:alice</li>
+     *   <li>user:123</li>
+     *   <li>user:⟨uuid⟩</li>
+     * </ul>
+     *
+     * @param recordId the record ID to validate
+     * @throws IllegalArgumentException if record ID format is invalid
+     */
+    public static void validateRecordId(String recordId) {
+        if (recordId == null || recordId.isEmpty()) {
+            throw new IllegalArgumentException("Record ID cannot be null or empty");
+        }
+        // Must contain exactly one colon separating table:id
+        if (!recordId.matches("^[a-zA-Z_][a-zA-Z0-9_]*:[a-zA-Z0-9_\\-]+$")) {
+            throw new IllegalArgumentException(
+                    "Invalid record ID format: " + recordId + " (expected table:id with safe characters)");
+        }
     }
 
     /**

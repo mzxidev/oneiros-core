@@ -69,7 +69,6 @@ public class Oneiros implements AutoCloseable {
     private final OneirosClient client;
     private final CryptoService cryptoService;
     private final OneirosLiveManager liveManager;
-    private final OneirosGraph graph;
     private final OneirosMigrationEngine migrationEngine;
 
     /**
@@ -81,7 +80,6 @@ public class Oneiros implements AutoCloseable {
             ObjectMapper objectMapper,
             CryptoService cryptoService,
             OneirosLiveManager liveManager,
-            OneirosGraph graph,
             OneirosMigrationEngine migrationEngine,
             OneirosConfig config
     ) {
@@ -89,7 +87,6 @@ public class Oneiros implements AutoCloseable {
         this.objectMapper = objectMapper;
         this.cryptoService = cryptoService;
         this.liveManager = liveManager;
-        this.graph = graph;
         this.migrationEngine = migrationEngine;
         this.config = config;
         this.circuitBreaker = null; // External management
@@ -115,7 +112,6 @@ public class Oneiros implements AutoCloseable {
 
         // Create dependent services
         this.liveManager = new OneirosLiveManager(client, objectMapper, cryptoService);
-        this.graph = new OneirosGraph(client, objectMapper, cryptoService);
 
         // Create migration engine if enabled
         if (config.getMigration().isEnabled()) {
@@ -178,10 +174,11 @@ public class Oneiros implements AutoCloseable {
     }
 
     /**
-     * Returns the graph API for relations.
+     * Returns a new graph API instance for relations.
+     * Note: Returns a new instance per call for thread-safety.
      */
     public OneirosGraph graph() {
-        return graph;
+        return new OneirosGraph(client, objectMapper, cryptoService);
     }
 
     /**
@@ -254,10 +251,10 @@ public class Oneiros implements AutoCloseable {
     }
 
     /**
-     * Disconnects from SurrealDB and blocks until disconnected.
+     * Disconnects from SurrealDB and blocks until disconnected (max 10 seconds).
      */
     public void disconnectBlocking() {
-        disconnect().block();
+        disconnect().block(java.time.Duration.ofSeconds(10));
     }
 
     /**

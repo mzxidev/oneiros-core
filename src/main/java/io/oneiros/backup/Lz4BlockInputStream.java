@@ -101,6 +101,12 @@ public class Lz4BlockInputStream extends InputStream {
     }
 
     /**
+     * Maximum allowed block size to prevent OOM from crafted files.
+     * 16MB is generous but prevents malicious multi-GB allocations.
+     */
+    private static final int MAX_BLOCK_SIZE = 16 * 1024 * 1024; // 16MB
+
+    /**
      * Read and decompress the next block.
      *
      * @return true if block was read, false if EOF
@@ -119,15 +125,17 @@ public class Lz4BlockInputStream extends InputStream {
             return false;
         }
 
-        if (uncompressedLength <= 0) {
-            throw new IOException("Invalid uncompressed block length: " + uncompressedLength);
+        if (uncompressedLength <= 0 || uncompressedLength > MAX_BLOCK_SIZE) {
+            throw new IOException("Invalid uncompressed block length: " + uncompressedLength
+                    + " (max: " + MAX_BLOCK_SIZE + ")");
         }
 
         // Read compressed length
         int compressedLength = readInt();
 
-        if (compressedLength <= 0) {
-            throw new IOException("Invalid compressed block length: " + compressedLength);
+        if (compressedLength <= 0 || compressedLength > MAX_BLOCK_SIZE) {
+            throw new IOException("Invalid compressed block length: " + compressedLength
+                    + " (max: " + MAX_BLOCK_SIZE + ")");
         }
 
         // Read compressed data

@@ -1,6 +1,7 @@
 package io.oneiros.audit;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
@@ -21,12 +22,18 @@ class SecurityAuditLoggerTest {
     @BeforeEach
     void setUp() {
         logger = SecurityAuditLogger.getInstance();
+        logger.clearHandlers();
         logger.resetCounters();
         logger.setEnabled(true);
         logger.setMinSeverity(SecurityAuditEvent.Severity.DEBUG);
 
         capturedEvents = new ArrayList<>();
         logger.registerHandler(capturedEvents::add);
+    }
+
+    @AfterEach
+    void tearDown() {
+        logger.clearHandlers();
     }
 
     @Test

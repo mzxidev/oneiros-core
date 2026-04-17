@@ -512,7 +512,6 @@ public class OneirosBuilder {
 
         // Create optional components
         OneirosLiveManager liveManager = new OneirosLiveManager(client, mapper, cryptoService);
-        OneirosGraph graph = new OneirosGraph(client, mapper, cryptoService);
 
         // Create migration engine if enabled
         OneirosMigrationEngine migrationEngine = null;
@@ -535,7 +534,7 @@ public class OneirosBuilder {
                 .subscribe();
         }
 
-        return new Oneiros(client, mapper, cryptoService, liveManager, graph, migrationEngine, config);
+        return new Oneiros(client, mapper, cryptoService, liveManager, migrationEngine, config);
     }
 
     // ============================================================
@@ -593,7 +592,7 @@ public class OneirosBuilder {
         mapper.registerModule(timeModule);
 
         // Don't serialize null values
-        mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        mapper.setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
 
         // Don't write dates as timestamps
         mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);

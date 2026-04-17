@@ -69,13 +69,13 @@ public class IntegratedQueryDemo {
         OneirosQuery.update(User.class)
             .set("verified", true)
             .set("verified_at", "time::now()")
-            .where("email = 'alice@example.com'")
+            .where("email", "=", "alice@example.com")
             .returnAfter()
             .execute(client);
 
         // DELETE
         OneirosQuery.delete(User.class)
-            .where("age < 18")
+            .where("age", "<", 18)
             .returnBefore()
             .execute(client);
 
@@ -83,7 +83,7 @@ public class IntegratedQueryDemo {
         OneirosQuery.upsert(User.class)
             .set("name", "Bob")
             .set("email", "bob@example.com")
-            .where("email = 'bob@example.com'")
+            .where("email", "=", "bob@example.com")
             .execute(client);
 
         // INSERT with duplicate key handling
@@ -137,27 +137,32 @@ public class IntegratedQueryDemo {
                 .set("email", "test@example.com"))
             .add(OneirosQuery.update(User.class)
                 .set("verified", true)
-                .where("email = 'test@example.com'"))
+                .where("email", "=", "test@example.com"))
             .commit(client);
 
         // Transaction with error handling
-        OneirosQuery.transaction()
+        var tx = OneirosQuery.transaction()
             .add(OneirosQuery.let("amount", "100"))
             .add(OneirosQuery.let("from", "account:alice"))
             .add(OneirosQuery.let("to", "account:bob"))
 
             // Check balance
             .add(OneirosQuery.ifCondition("$from.balance < $amount")
-                .then(OneirosQuery.throwError("Insufficient funds")))
+                .then(OneirosQuery.throwError("Insufficient funds")));
 
-            // Transfer money
-            .add(OneirosQuery.update(User.class)
-                .setRaw("balance -= $amount")
-                .where("id = $from"))
-            .add(OneirosQuery.update(User.class)
-                .setRaw("balance += $amount")
-                .where("id = $to"))
+        // Transfer money — setRaw() is intentional here: expressions reference only SurrealDB
+        // LET variables ($amount, $from, $to), never user input. No injection risk.
+        @SuppressWarnings("deprecation")
+        var debit = OneirosQuery.update(User.class)
+            .setRaw("balance -= $amount")
+            .whereRaw("id = $from");
+        @SuppressWarnings("deprecation")
+        var credit = OneirosQuery.update(User.class)
+            .setRaw("balance += $amount")
+            .whereRaw("id = $to");
 
+        tx.add(debit)
+            .add(credit)
             .returnValue("{ success: true, amount: $amount }")
             .commit(client);
     }
@@ -168,22 +173,27 @@ public class IntegratedQueryDemo {
 
     public void conditionalExamples() {
         // Simple IF/ELSE
+        // whereRaw() is intentional: "user.id" is a SurrealDB context expression, not a Java
+        // value — it cannot be expressed as a parameterized where(field, op, value) triple.
+        @SuppressWarnings("deprecation")
+        var updateFull = OneirosQuery.update(User.class).set("permissions", "full").whereRaw("id = user.id");
+        @SuppressWarnings("deprecation")
+        var updateLimited = OneirosQuery.update(User.class).set("permissions", "limited").whereRaw("id = user.id");
+
         OneirosQuery.ifCondition("user.role = 'ADMIN'")
-            .then(OneirosQuery.update(User.class)
-                .set("permissions", "full")
-                .where("id = user.id"))
+            .then(updateFull)
             .elseBlock()
-            .then(OneirosQuery.update(User.class)
-                .set("permissions", "limited")
-                .where("id = user.id"))
+            .then(updateLimited)
             .build()
             .execute(client);
 
         // Nested conditions
+        @SuppressWarnings("deprecation")
+        var grantVote = OneirosQuery.update(User.class).set("can_vote", true).whereRaw("id = user.id");
+
         OneirosQuery.ifCondition("user.age >= 18")
             .then(OneirosQuery.ifCondition("user.verified = true")
-                .then(OneirosQuery.update(User.class)
-                    .set("can_vote", true))
+                .then(grantVote)
                 .elseBlock()
                 .then(OneirosQuery.throwError("User not verified"))
                 .build())
@@ -236,7 +246,8 @@ public class IntegratedQueryDemo {
             .add(userQuery)
             .add(OneirosQuery.update(User.class)
                 .set("processed", true)
-                .where("age >= 18 AND verified = true"))
+                .where("age", ">=", 18)
+                .and("verified", "=", true))
             .commit(client);
 
         // Fluent query with statement API operations
@@ -391,7 +402,7 @@ public class IntegratedQueryDemo {
         OneirosQuery.upsert(User.class)
             .set("name", "Bob")
             .set("email", "bob@example.com")
-            .where("email = 'bob@example.com'")
+            .where("email", "=", "bob@example.com")
             .execute(client)
             .subscribe(user -> System.out.println("Upserted efficiently: " + user));
     }

@@ -12,29 +12,34 @@ import reactor.core.publisher.Mono;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Production-ready migration engine for SurrealDB.
  *
- * <p>Features two migration strategies:
+ * <p>
+ * Features two migration strategies:
  * <ol>
- *   <li><b>Versioned Migrations (Flyway-style):</b> Execute {@link OneirosMigration} implementations
- *       in version order. Track applied migrations in {@code oneiros_schema_history}.</li>
- *   <li><b>Schema Sync:</b> Auto-generate DEFINE statements from {@link OneirosTable} annotations
- *       to ensure tables exist with correct structure.</li>
+ * <li><b>Versioned Migrations (Flyway-style):</b> Execute
+ * {@link OneirosMigration} implementations
+ * in version order. Track applied migrations in
+ * {@code oneiros_schema_history}.</li>
+ * <li><b>Schema Sync:</b> Auto-generate DEFINE statements from
+ * {@link OneirosTable} annotations
+ * to ensure tables exist with correct structure.</li>
  * </ol>
  *
- * <p><b>Execution Order:</b>
+ * <p>
+ * <b>Execution Order:</b>
  * <ol>
- *   <li>Create {@code oneiros_schema_history} table (if not exists)</li>
- *   <li>Execute pending versioned migrations (in order)</li>
- *   <li>Sync schema definitions from {@code @OneirosTable} classes</li>
+ * <li>Create {@code oneiros_schema_history} table (if not exists)</li>
+ * <li>Execute pending versioned migrations (in order)</li>
+ * <li>Sync schema definitions from {@code @OneirosTable} classes</li>
  * </ol>
  *
- * <p>This engine is framework-agnostic and uses ClassGraph for classpath scanning.
+ * <p>
+ * This engine is framework-agnostic and uses ClassGraph for classpath scanning.
  *
  * @see OneirosMigration
  * @see OneirosTable
@@ -59,7 +64,8 @@ public class OneirosMigrationEngine {
         this(client, basePackage, autoMigrate, dryRun, false);
     }
 
-    public OneirosMigrationEngine(OneirosClient client, String basePackage, boolean autoMigrate, boolean dryRun, boolean overwrite) {
+    public OneirosMigrationEngine(OneirosClient client, String basePackage, boolean autoMigrate, boolean dryRun,
+            boolean overwrite) {
         this.client = client;
         this.basePackage = basePackage;
         this.autoMigrate = autoMigrate;
@@ -90,10 +96,10 @@ public class OneirosMigrationEngine {
         log.info("📦 Base package: {}", basePackage);
 
         return createSchemaHistoryTable()
-            .then(runVersionedMigrations())
-            .then(syncSchemaDefinitions())
-            .doOnSuccess(v -> log.info("✅ Migration completed successfully"))
-            .doOnError(e -> log.error("❌ Migration failed", e));
+                .then(runVersionedMigrations())
+                .then(syncSchemaDefinitions())
+                .doOnSuccess(v -> log.info("✅ Migration completed successfully"))
+                .doOnError(e -> log.error("❌ Migration failed", e));
     }
 
     /**
@@ -103,17 +109,16 @@ public class OneirosMigrationEngine {
         log.debug("📋 Creating schema history table...");
 
         String sql = String.format(
-            "DEFINE TABLE IF NOT EXISTS %s SCHEMAFULL; " +
-            "DEFINE FIELD IF NOT EXISTS version ON %s TYPE int; " +
-            "DEFINE FIELD IF NOT EXISTS description ON %s TYPE string; " +
-            "DEFINE FIELD IF NOT EXISTS installed_on ON %s TYPE datetime; " +
-            "DEFINE FIELD IF NOT EXISTS execution_time_ms ON %s TYPE int; " +
-            "DEFINE FIELD IF NOT EXISTS success ON %s TYPE bool; " +
-            "DEFINE FIELD IF NOT EXISTS error_message ON %s TYPE option<string>; " +
-            "DEFINE INDEX IF NOT EXISTS idx_version ON %s FIELDS version UNIQUE;",
-            HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE,
-            HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE
-        );
+                "DEFINE TABLE IF NOT EXISTS %s SCHEMAFULL; " +
+                        "DEFINE FIELD IF NOT EXISTS version ON %s TYPE int; " +
+                        "DEFINE FIELD IF NOT EXISTS description ON %s TYPE string; " +
+                        "DEFINE FIELD IF NOT EXISTS installed_on ON %s TYPE datetime; " +
+                        "DEFINE FIELD IF NOT EXISTS execution_time_ms ON %s TYPE int; " +
+                        "DEFINE FIELD IF NOT EXISTS success ON %s TYPE bool; " +
+                        "DEFINE FIELD IF NOT EXISTS error_message ON %s TYPE option<string>; " +
+                        "DEFINE INDEX IF NOT EXISTS idx_version ON %s FIELDS version UNIQUE;",
+                HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE,
+                HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE, HISTORY_TABLE);
 
         if (dryRun) {
             log.info("📝 [DRY-RUN] Would create schema history table");
@@ -121,15 +126,15 @@ public class OneirosMigrationEngine {
         }
 
         return client.query(sql, Object.class)
-            .then()
-            .doOnSuccess(v -> log.debug("✅ Schema history table ready"))
-            .onErrorResume(e -> {
-                if (e.getMessage() != null && e.getMessage().contains("already exists")) {
-                    log.debug("⏭️ Schema history table already exists");
-                    return Mono.empty();
-                }
-                return Mono.error(e);
-            });
+                .then()
+                .doOnSuccess(v -> log.debug("✅ Schema history table ready"))
+                .onErrorResume(e -> {
+                    if (e.getMessage() != null && e.getMessage().contains("already exists")) {
+                        log.debug("⏭️ Schema history table already exists");
+                        return Mono.empty();
+                    }
+                    return Mono.error(e);
+                });
     }
 
     /**
@@ -139,38 +144,37 @@ public class OneirosMigrationEngine {
         log.info("🔍 Scanning for versioned migrations...");
 
         return getCurrentDatabaseVersion()
-            .flatMap(currentVersion -> {
-                log.info("📊 Current database version: {}", currentVersion);
+                .flatMap(currentVersion -> {
+                    log.info("📊 Current database version: {}", currentVersion);
 
-                // Scan for OneirosMigration implementations
-                Set<OneirosMigration> migrations = scanMigrations();
+                    // Scan for OneirosMigration implementations
+                    Set<OneirosMigration> migrations = scanMigrations();
 
-                if (migrations.isEmpty()) {
-                    log.info("📦 No versioned migrations found");
-                    return Mono.empty();
-                }
+                    if (migrations.isEmpty()) {
+                        log.info("📦 No versioned migrations found");
+                        return Mono.empty();
+                    }
 
-                // Filter and sort pending migrations
-                List<OneirosMigration> pendingMigrations = migrations.stream()
-                    .filter(m -> m.getVersion() > currentVersion)
-                    .sorted(Comparator.comparingInt(OneirosMigration::getVersion))
-                    .collect(Collectors.toList());
+                    // Filter and sort pending migrations
+                    List<OneirosMigration> pendingMigrations = migrations.stream()
+                            .filter(m -> m.getVersion() > currentVersion)
+                            .sorted(Comparator.comparingInt(OneirosMigration::getVersion))
+                            .collect(Collectors.toList());
 
-                if (pendingMigrations.isEmpty()) {
-                    log.info("✅ All migrations up to date (version: {})", currentVersion);
-                    return Mono.empty();
-                }
+                    if (pendingMigrations.isEmpty()) {
+                        log.info("✅ All migrations up to date (version: {})", currentVersion);
+                        return Mono.empty();
+                    }
 
-                log.info("📋 Found {} pending migrations", pendingMigrations.size());
-                pendingMigrations.forEach(m ->
-                    log.info("   - V{}: {}", String.format("%03d", m.getVersion()), m.getDescription())
-                );
+                    log.info("📋 Found {} pending migrations", pendingMigrations.size());
+                    pendingMigrations.forEach(
+                            m -> log.info("   - V{}: {}", String.format("%03d", m.getVersion()), m.getDescription()));
 
-                // Execute migrations sequentially
-                return Flux.fromIterable(pendingMigrations)
-                    .concatMap(this::executeMigration)
-                    .then();
-            });
+                    // Execute migrations sequentially
+                    return Flux.fromIterable(pendingMigrations)
+                            .concatMap(this::executeMigration)
+                            .then();
+                });
     }
 
     /**
@@ -182,23 +186,22 @@ public class OneirosMigrationEngine {
         }
 
         String query = String.format(
-            "SELECT * FROM %s WHERE success = true ORDER BY version DESC LIMIT 1",
-            HISTORY_TABLE
-        );
+                "SELECT * FROM %s WHERE success = true ORDER BY version DESC LIMIT 1",
+                HISTORY_TABLE);
 
         return client.query(query, SchemaHistoryEntry.class)
-            .collectList()
-            .map(entries -> {
-                if (entries.isEmpty()) {
-                    return 0;
-                }
-                return entries.get(0).getVersion();
-            })
-            .onErrorResume(e -> {
-                // Table might not exist yet or be empty
-                log.debug("No migration history found, starting from version 0");
-                return Mono.just(0);
-            });
+                .collectList()
+                .map(entries -> {
+                    if (entries.isEmpty()) {
+                        return 0;
+                    }
+                    return entries.get(0).getVersion();
+                })
+                .onErrorResume(e -> {
+                    // Table might not exist yet or be empty
+                    log.debug("No migration history found, starting from version 0");
+                    return Mono.just(0);
+                });
     }
 
     /**
@@ -215,8 +218,8 @@ public class OneirosMigrationEngine {
                     OneirosMigration migration = (OneirosMigration) clazz.getDeclaredConstructor().newInstance();
                     migrations.add(migration);
                     log.debug("📦 Found migration: V{} - {}",
-                        String.format("%03d", migration.getVersion()),
-                        migration.getDescription());
+                            String.format("%03d", migration.getVersion()),
+                            migration.getDescription());
                 }
             } catch (Exception e) {
                 log.warn("⚠️ Failed to instantiate migration: {}", clazz.getName(), e);
@@ -231,8 +234,8 @@ public class OneirosMigrationEngine {
      */
     private Mono<Void> executeMigration(OneirosMigration migration) {
         log.info("🔨 Executing migration V{}: {}",
-            String.format("%03d", migration.getVersion()),
-            migration.getDescription());
+                String.format("%03d", migration.getVersion()),
+                migration.getDescription());
 
         if (dryRun) {
             log.info("📝 [DRY-RUN] Would execute migration V{}", migration.getVersion());
@@ -240,46 +243,46 @@ public class OneirosMigrationEngine {
         }
 
         SchemaHistoryEntry entry = new SchemaHistoryEntry(
-            migration.getVersion(),
-            migration.getDescription()
-        );
+                migration.getVersion(),
+                migration.getDescription());
 
         long startTime = System.currentTimeMillis();
 
         return migration.up(client)
-            .then(Mono.defer(() -> {
-                // Migration successful
-                long executionTime = System.currentTimeMillis() - startTime;
-                entry.setExecutionTimeMs(executionTime);
-                entry.setSuccess(true);
+                .then(Mono.defer(() -> {
+                    // Migration successful
+                    long executionTime = System.currentTimeMillis() - startTime;
+                    entry.setExecutionTimeMs(executionTime);
+                    entry.setSuccess(true);
 
-                log.info("✅ Migration V{} completed in {}ms",
-                    String.format("%03d", migration.getVersion()),
-                    executionTime);
+                    log.info("✅ Migration V{} completed in {}ms",
+                            String.format("%03d", migration.getVersion()),
+                            executionTime);
 
-                return recordMigration(entry);
-            }))
-            .onErrorResume(e -> {
-                // Migration failed
-                long executionTime = System.currentTimeMillis() - startTime;
-                entry.setExecutionTimeMs(executionTime);
-                entry.setSuccess(false);
-                entry.setErrorMessage(e.getMessage());
+                    return recordMigration(entry);
+                }))
+                .onErrorResume(e -> {
+                    // Migration failed
+                    long executionTime = System.currentTimeMillis() - startTime;
+                    entry.setExecutionTimeMs(executionTime);
+                    entry.setSuccess(false);
+                    entry.setErrorMessage(e.getMessage());
 
-                log.error("❌ Migration V{} failed after {}ms",
-                    String.format("%03d", migration.getVersion()),
-                    executionTime, e);
+                    log.error("❌ Migration V{} failed after {}ms",
+                            String.format("%03d", migration.getVersion()),
+                            executionTime, e);
 
-                return recordMigration(entry)
-                    .then(Mono.error(new RuntimeException(
-                        "Migration V" + migration.getVersion() + " failed: " + e.getMessage(), e)));
-            });
+                    return recordMigration(entry)
+                            .then(Mono.error(new RuntimeException(
+                                    "Migration V" + migration.getVersion() + " failed: " + e.getMessage(), e)));
+                });
     }
 
     /**
      * Record a migration in the schema history table using parameterized queries.
      *
-     * <p>Uses parameter binding to prevent SQL injection attacks.
+     * <p>
+     * Uses parameter binding to prevent SQL injection attacks.
      */
     private Mono<Void> recordMigration(SchemaHistoryEntry entry) {
         try {
@@ -288,8 +291,8 @@ public class OneirosMigrationEngine {
             Map<String, Object> params = SqlInjectionPrevention.createMigrationHistoryParams(entry);
 
             return client.query(query, params, Object.class)
-                .then()
-                .doOnSuccess(v -> log.debug("📝 Recorded migration history: V{}", entry.getVersion()));
+                    .then()
+                    .doOnSuccess(v -> log.debug("📝 Recorded migration history: V{}", entry.getVersion()));
         } catch (Exception e) {
             log.error("Failed to record migration history", e);
             return Mono.error(e);
@@ -315,21 +318,21 @@ public class OneirosMigrationEngine {
         // Convert to sequential reactive stream:
         // entities -> Flux -> concatMap (sequential) -> execute one by one
         return Flux.fromIterable(entities)
-            .concatMap(entityClass -> {
-                // For each entity, generate ALL its schema statements first
-                log.debug("🔨 Syncing schema for: {}", entityClass.getSimpleName());
-                return generateSchemaForEntity(entityClass)
-                    .collectList()  // Collect all statements for this entity
-                    .flatMapMany(statements -> {
-                        // Now execute statements for this entity sequentially
-                        log.debug("📋 {} statements to execute for {}",
-                            statements.size(), entityClass.getSimpleName());
-                        return Flux.fromIterable(statements);
-                    })
-                    .concatMap(sql -> executeStatement(sql));  // Execute one by one
-            })
-            .then()
-            .doOnSuccess(v -> log.info("✅ Schema sync completed"));
+                .concatMap(entityClass -> {
+                    // For each entity, generate ALL its schema statements first
+                    log.debug("🔨 Syncing schema for: {}", entityClass.getSimpleName());
+                    return generateSchemaForEntity(entityClass)
+                            .collectList() // Collect all statements for this entity
+                            .flatMapMany(statements -> {
+                                // Now execute statements for this entity sequentially
+                                log.debug("📋 {} statements to execute for {}",
+                                        statements.size(), entityClass.getSimpleName());
+                                return Flux.fromIterable(statements);
+                            })
+                            .concatMap(sql -> executeStatement(sql)); // Execute one by one
+                })
+                .then()
+                .doOnSuccess(v -> log.info("✅ Schema sync completed"));
     }
 
     /**
@@ -349,35 +352,36 @@ public class OneirosMigrationEngine {
         log.debug("📤 Executing: {}", sql);
 
         return client.query(sql, Object.class)
-            .then()
-            .doOnSuccess(v -> log.debug("✅ Executed: {}", extractElementName(sql)))
-            .onErrorResume(e -> {
-                String msg = e.getMessage();
+                .then()
+                .doOnSuccess(v -> log.debug("✅ Executed: {}", extractElementName(sql)))
+                .onErrorResume(e -> {
+                    String msg = e.getMessage();
 
-                // Handle "already exists" gracefully
-                if (msg != null && msg.contains("already exists")) {
-                    if (!overwrite) {
-                        log.warn("⚠️ Schema element already exists: {}. " +
-                            "If you updated field assertions or types, set 'oneiros.migration.overwrite: true' " +
-                            "in application.yml to update existing definitions.",
-                            extractElementName(sql));
+                    // Handle "already exists" gracefully
+                    if (msg != null && msg.contains("already exists")) {
+                        if (!overwrite) {
+                            log.warn("⚠️ Schema element already exists: {}. " +
+                                    "If you updated field assertions or types, set 'oneiros.migration.overwrite: true' "
+                                    +
+                                    "in application.yml to update existing definitions.",
+                                    extractElementName(sql));
+                        }
+                        log.debug("⏭️ Skipping (already exists): {}", sql);
+                        return Mono.empty();
                     }
-                    log.debug("⏭️ Skipping (already exists): {}", sql);
-                    return Mono.empty();
-                }
 
-                // Check for common assertion errors that indicate stale schema
-                if (msg != null && msg.contains("length()") && msg.contains("no such method")) {
-                    log.error("❌ SurrealDB error indicates stale schema with old assertions. " +
-                        "Please set 'oneiros.migration.overwrite: true' in application.yml " +
-                        "or manually run: REMOVE TABLE <tablename>; in SurrealDB");
-                }
+                    // Check for common assertion errors that indicate stale schema
+                    if (msg != null && msg.contains("length()") && msg.contains("no such method")) {
+                        log.error("❌ SurrealDB error indicates stale schema with old assertions. " +
+                                "Please set 'oneiros.migration.overwrite: true' in application.yml " +
+                                "or manually run: REMOVE TABLE <tablename>; in SurrealDB");
+                    }
 
-                // Log the actual error and fail the migration
-                log.error("❌ Failed to execute: {}", sql);
-                log.error("   Error: {}", msg);
-                return Mono.error(e);
-            });
+                    // Log the actual error and fail the migration
+                    log.error("❌ Failed to execute: {}", sql);
+                    log.error("   Error: {}", msg);
+                    return Mono.error(e);
+                });
     }
 
     /**
@@ -415,7 +419,8 @@ public class OneirosMigrationEngine {
 
     /**
      * Scan classpath for entity classes using the framework-agnostic scanner.
-     * Excludes test, demo, and example packages/classes from the oneiros-core library.
+     * Excludes test, demo, and example packages/classes from the oneiros-core
+     * library.
      */
     private Set<Class<?>> scanEntities() {
         ClasspathEntityScanner scanner = new ClasspathEntityScanner();
@@ -432,9 +437,10 @@ public class OneirosMigrationEngine {
             // Get table name from @OneirosTable or @OneirosEntity
             String tableName = getTableName(entityClass);
 
-            // Check if this is a schema-only class (has @OneirosTable but no @OneirosEntity)
+            // Check if this is a schema-only class (has @OneirosTable but no
+            // @OneirosEntity)
             boolean isSchemaOnly = entityClass.isAnnotationPresent(OneirosTable.class)
-                && !entityClass.isAnnotationPresent(OneirosEntity.class);
+                    && !entityClass.isAnnotationPresent(OneirosEntity.class);
 
             log.info("🏗️ Generating schema for table: {} (schema-only: {})", tableName, isSchemaOnly);
 
@@ -507,7 +513,8 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE TABLE statement.
-     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing definitions.
+     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing
+     * definitions.
      */
     private String generateDefineTable(Class<?> entityClass, String tableName) {
         StringBuilder sql = new StringBuilder();
@@ -549,7 +556,8 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE FIELD statement.
-     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing definitions.
+     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing
+     * definitions.
      */
     private String generateDefineField(Field field, String tableName) {
         StringBuilder sql = new StringBuilder();
@@ -582,7 +590,8 @@ public class OneirosMigrationEngine {
                 assertion = validateAndFixAssertion(assertion, field.getName(), tableName);
             }
         } else {
-            // If no annotation, infer optional from whether the field type is a reference type (can be null)
+            // If no annotation, infer optional from whether the field type is a reference
+            // type (can be null)
             // Primitive types cannot be null, but their wrapper classes can
             optional = !field.getType().isPrimitive();
         }
@@ -600,9 +609,11 @@ public class OneirosMigrationEngine {
         }
 
         // Wrap in option<> if the field is optional/nullable
-        // Note: SurrealDB does not support option<any> or option<object> - these types already accept null values
+        // Note: SurrealDB does not support option<any> or option<object> - these types
+        // already accept null values
         // This also applies to types containing 'any' like array<any>, set<any>, etc.
-        // We need to check if the type IS 'any'/'object' OR CONTAINS 'any' anywhere in the type string
+        // We need to check if the type IS 'any'/'object' OR CONTAINS 'any' anywhere in
+        // the type string
         boolean isAnyType = surrealType != null && containsAnyType(surrealType);
         boolean isObjectType = surrealType != null && "object".equals(surrealType);
         if (surrealType != null && optional && !surrealType.startsWith("option<") && !isAnyType && !isObjectType) {
@@ -634,14 +645,15 @@ public class OneirosMigrationEngine {
 
     /**
      * Generate DEFINE INDEX statement.
-     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing definitions.
+     * Uses IF NOT EXISTS for idempotent migrations, or OVERWRITE to update existing
+     * definitions.
      */
     private String generateDefineIndex(Field field, String tableName, OneirosField fieldAnnotation) {
         StringBuilder sql = new StringBuilder();
 
         String indexName = fieldAnnotation.indexName().isEmpty()
-            ? "idx_" + tableName + "_" + field.getName()
-            : fieldAnnotation.indexName();
+                ? "idx_" + tableName + "_" + field.getName()
+                : fieldAnnotation.indexName();
 
         if (overwrite) {
             sql.append("DEFINE INDEX OVERWRITE ").append(indexName);
@@ -667,8 +679,8 @@ public class OneirosMigrationEngine {
 
         OneirosVersioned versionAnnotation = entityClass.getAnnotation(OneirosVersioned.class);
         String historyTable = versionAnnotation.historyTable().isEmpty()
-            ? tableName + "_history"
-            : versionAnnotation.historyTable();
+                ? tableName + "_history"
+                : versionAnnotation.historyTable();
 
         log.info("📜 Creating history table: {}", historyTable);
 
@@ -710,22 +722,38 @@ public class OneirosMigrationEngine {
     private String inferSurrealType(Field field) {
         Class<?> type = field.getType();
 
-        if (type == String.class) return "string";
-        if (type == Integer.class || type == int.class) return "int";
-        if (type == Long.class || type == long.class) return "int";
-        if (type == Double.class || type == double.class) return "float";
-        if (type == Float.class || type == float.class) return "float";
-        if (type == Boolean.class || type == boolean.class) return "bool";
-        if (type == java.time.LocalDateTime.class) return "datetime";
-        if (type == java.time.LocalDate.class) return "datetime";
-        if (type == java.time.Instant.class) return "datetime";
-        if (type == java.util.UUID.class) return "uuid";
-        if (type == java.time.Duration.class) return "duration";
-        if (type == byte[].class) return "bytes";
-        if (type == java.math.BigDecimal.class) return "decimal";
-        if (type == java.math.BigInteger.class) return "int";
-        if (type == Short.class || type == short.class) return "int";
-        if (type == Byte.class || type == byte.class) return "int";
+        if (type == String.class)
+            return "string";
+        if (type == Integer.class || type == int.class)
+            return "int";
+        if (type == Long.class || type == long.class)
+            return "int";
+        if (type == Double.class || type == double.class)
+            return "float";
+        if (type == Float.class || type == float.class)
+            return "float";
+        if (type == Boolean.class || type == boolean.class)
+            return "bool";
+        if (type == java.time.LocalDateTime.class)
+            return "datetime";
+        if (type == java.time.LocalDate.class)
+            return "datetime";
+        if (type == java.time.Instant.class)
+            return "datetime";
+        if (type == java.util.UUID.class)
+            return "uuid";
+        if (type == java.time.Duration.class)
+            return "duration";
+        if (type == byte[].class)
+            return "bytes";
+        if (type == java.math.BigDecimal.class)
+            return "decimal";
+        if (type == java.math.BigInteger.class)
+            return "int";
+        if (type == Short.class || type == short.class)
+            return "int";
+        if (type == Byte.class || type == byte.class)
+            return "int";
 
         // Handle List -> array<T>
         if (List.class.isAssignableFrom(type)) {
@@ -773,23 +801,40 @@ public class OneirosMigrationEngine {
     }
 
     private String inferTypeFromClass(Class<?> clazz) {
-        if (clazz == String.class) return "string";
-        if (clazz == Integer.class || clazz == int.class) return "int";
-        if (clazz == Long.class || clazz == long.class) return "int";
-        if (clazz == Double.class || clazz == double.class) return "float";
-        if (clazz == Float.class || clazz == float.class) return "float";
-        if (clazz == Boolean.class || clazz == boolean.class) return "bool";
-        if (clazz == java.time.LocalDateTime.class) return "datetime";
-        if (clazz == java.time.LocalDate.class) return "datetime";
-        if (clazz == java.time.Instant.class) return "datetime";
-        if (clazz == java.util.UUID.class) return "uuid";
-        if (clazz == java.time.Duration.class) return "duration";
-        if (clazz == byte[].class) return "bytes";
-        if (Number.class.isAssignableFrom(clazz)) return "number";
-        if (Map.class.isAssignableFrom(clazz)) return "object";
-        if (Set.class.isAssignableFrom(clazz)) return "set";
-        if (List.class.isAssignableFrom(clazz)) return "array";
-        if (clazz.isEnum()) return "string";
+        if (clazz == String.class)
+            return "string";
+        if (clazz == Integer.class || clazz == int.class)
+            return "int";
+        if (clazz == Long.class || clazz == long.class)
+            return "int";
+        if (clazz == Double.class || clazz == double.class)
+            return "float";
+        if (clazz == Float.class || clazz == float.class)
+            return "float";
+        if (clazz == Boolean.class || clazz == boolean.class)
+            return "bool";
+        if (clazz == java.time.LocalDateTime.class)
+            return "datetime";
+        if (clazz == java.time.LocalDate.class)
+            return "datetime";
+        if (clazz == java.time.Instant.class)
+            return "datetime";
+        if (clazz == java.util.UUID.class)
+            return "uuid";
+        if (clazz == java.time.Duration.class)
+            return "duration";
+        if (clazz == byte[].class)
+            return "bytes";
+        if (Number.class.isAssignableFrom(clazz))
+            return "number";
+        if (Map.class.isAssignableFrom(clazz))
+            return "object";
+        if (Set.class.isAssignableFrom(clazz))
+            return "set";
+        if (List.class.isAssignableFrom(clazz))
+            return "array";
+        if (clazz.isEnum())
+            return "string";
         // For unknown types, use 'object' which is more flexible
         // When wrapped with option<>, it becomes option<object>
         // SurrealDB doesn't support 'any', only concrete types
@@ -828,7 +873,6 @@ public class OneirosMigrationEngine {
         }
     }
 
-
     /**
      * Generate DEFINE ANALYZER and DEFINE INDEX for full-text search.
      * Uses IF NOT EXISTS for idempotent migrations (SurrealDB 1.x compatible).
@@ -841,8 +885,8 @@ public class OneirosMigrationEngine {
         String fieldName = field.getName();
 
         String indexName = ftAnnotation.indexName().isEmpty()
-            ? "idx_" + tableName + "_" + fieldName + "_fts"
-            : ftAnnotation.indexName();
+                ? "idx_" + tableName + "_" + fieldName + "_fts"
+                : ftAnnotation.indexName();
 
         log.info("🔍 Creating full-text search index: {} on {}.{}", indexName, tableName, fieldName);
 
@@ -876,16 +920,18 @@ public class OneirosMigrationEngine {
 
     /**
      * Validates and auto-fixes common assertion mistakes.
-     * This helps users migrate from JavaScript-style methods to SurrealDB functions.
+     * This helps users migrate from JavaScript-style methods to SurrealDB
+     * functions.
      *
-     * <p>Auto-fixes:
+     * <p>
+     * Auto-fixes:
      * <ul>
-     *   <li>$value.length() → string::len($value)</li>
-     *   <li>.trim() → string::trim()</li>
-     *   <li>.toLowerCase() → string::lowercase()</li>
-     *   <li>.toUpperCase() → string::uppercase()</li>
-     *   <li>.isEmpty() → string::len($value) == 0</li>
-     *   <li>.isBlank() → string::len(string::trim($value)) == 0</li>
+     * <li>$value.length() → string::len($value)</li>
+     * <li>.trim() → string::trim()</li>
+     * <li>.toLowerCase() → string::lowercase()</li>
+     * <li>.toUpperCase() → string::uppercase()</li>
+     * <li>.isEmpty() → string::len($value) == 0</li>
+     * <li>.isBlank() → string::len(string::trim($value)) == 0</li>
      * </ul>
      *
      * @param assertion The original assertion
@@ -902,7 +948,8 @@ public class OneirosMigrationEngine {
         boolean wasFixed = false;
 
         // Fix .length() -> string::len()
-        // Pattern: $value.length() or $input.length() - handles both with and without surrounding context
+        // Pattern: $value.length() or $input.length() - handles both with and without
+        // surrounding context
         if (assertion.contains(".length()")) {
             assertion = assertion.replaceAll("\\$(\\w+)\\.length\\(\\)", "string::len(\\$$1)");
             wasFixed = true;
@@ -964,7 +1011,7 @@ public class OneirosMigrationEngine {
 
         if (wasFixed) {
             log.warn("⚠️ Auto-fixed assertion on {}.{}: '{}' → '{}'",
-                tableName, fieldName, original, assertion);
+                    tableName, fieldName, original, assertion);
             log.warn("   💡 Please update your @OneirosField annotation to use SurrealDB functions!");
         }
 
@@ -976,16 +1023,20 @@ public class OneirosMigrationEngine {
      * SurrealDB does not support option<any>, array<any>, set<any>, etc. because
      * 'any' already accepts null/NONE values.
      *
-     * <p>Note: This check is separate from the 'object' type check, which is handled inline.
-     * Both 'any' and 'object' are nullable types that should not be wrapped in option<>.
+     * <p>
+     * Note: This check is separate from the 'object' type check, which is handled
+     * inline.
+     * Both 'any' and 'object' are nullable types that should not be wrapped in
+     * option<>.
      *
-     * <p>This method detects:
+     * <p>
+     * This method detects:
      * <ul>
-     *   <li>"any" - exact type</li>
-     *   <li>"array<any>" - generic with any</li>
-     *   <li>"set<any>" - generic with any</li>
-     *   <li>"option<any>" - already optional</li>
-     *   <li>Any nested combination containing 'any'</li>
+     * <li>"any" - exact type</li>
+     * <li>"array<any>" - generic with any</li>
+     * <li>"set<any>" - generic with any</li>
+     * <li>"option<any>" - already optional</li>
+     * <li>Any nested combination containing 'any'</li>
      * </ul>
      *
      * @param type The SurrealDB type string
@@ -1004,15 +1055,16 @@ public class OneirosMigrationEngine {
             return true;
         }
 
-        // Check for 'any' inside generic parameters: array<any>, set<any>, option<any>, etc.
+        // Check for 'any' inside generic parameters: array<any>, set<any>, option<any>,
+        // etc.
         // Also handles nested cases like array<option<any>>
         // Use word boundary check to avoid matching 'many' or 'company' etc.
         if (normalizedType.contains("<any>") ||
-            normalizedType.contains("<any,") ||
-            normalizedType.contains(",any>") ||
-            normalizedType.contains(", any>") ||
-            normalizedType.contains("<any ") ||
-            normalizedType.contains(" any>")) {
+                normalizedType.contains("<any,") ||
+                normalizedType.contains(",any>") ||
+                normalizedType.contains(", any>") ||
+                normalizedType.contains("<any ") ||
+                normalizedType.contains(" any>")) {
             return true;
         }
 

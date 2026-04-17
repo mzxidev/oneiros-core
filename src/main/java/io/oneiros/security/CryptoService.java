@@ -12,7 +12,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.crypto.scrypt.SCryptPasswordEncoder;
 
 import javax.crypto.Cipher;
-import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,25 +23,30 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Cryptography service for encryption and password hashing.
  *
- * <p>Supports multiple encryption/hashing algorithms:
+ * <p>
+ * Supports multiple encryption/hashing algorithms:
  * <ul>
- *   <li><strong>AES_GCM</strong> - Symmetric encryption (reversible)</li>
- *   <li><strong>ARGON2</strong> - Modern password hashing (recommended)</li>
- *   <li><strong>BCRYPT</strong> - Widely-used password hashing</li>
- *   <li><strong>SCRYPT</strong> - Memory-hard password hashing</li>
- *   <li><strong>SHA256/SHA512</strong> - Simple hashing (not for passwords)</li>
+ * <li><strong>AES_GCM</strong> - Symmetric encryption (reversible)</li>
+ * <li><strong>ARGON2</strong> - Modern password hashing (recommended)</li>
+ * <li><strong>BCRYPT</strong> - Widely-used password hashing</li>
+ * <li><strong>SCRYPT</strong> - Memory-hard password hashing</li>
+ * <li><strong>SHA256/SHA512</strong> - Simple hashing (not for passwords)</li>
  * </ul>
  *
- * <p><strong>Key Management:</strong> By default, keys are stored in application memory
- * using {@link InMemoryKeyProvider}. For high-security environments, you can inject
+ * <p>
+ * <strong>Key Management:</strong> By default, keys are stored in application
+ * memory
+ * using {@link InMemoryKeyProvider}. For high-security environments, you can
+ * inject
  * a custom {@link KeyProvider} for integration with:
  * <ul>
- *   <li>AWS KMS, Azure Key Vault, GCP Cloud KMS</li>
- *   <li>HashiCorp Vault</li>
- *   <li>Hardware Security Modules (HSM) via PKCS#11</li>
+ * <li>AWS KMS, Azure Key Vault, GCP Cloud KMS</li>
+ * <li>HashiCorp Vault</li>
+ * <li>Hardware Security Modules (HSM) via PKCS#11</li>
  * </ul>
  *
- * <p><strong>Note:</strong> This class uses Spring Security for password encoding
+ * <p>
+ * <strong>Note:</strong> This class uses Spring Security for password encoding
  * but works in non-Spring environments as well. Spring Security Crypto is a
  * standalone library that doesn't require the Spring Framework.
  *
@@ -72,7 +76,7 @@ public class CryptoService {
 
     /**
      * -- GETTER --
-     *  Checks if the encryption/security feature is enabled.
+     * Checks if the encryption/security feature is enabled.
      */
     @Getter
     private final boolean enabled;
@@ -84,7 +88,8 @@ public class CryptoService {
     private final Map<String, PasswordEncoder> encoderCache = new ConcurrentHashMap<>();
 
     /**
-     * Creates a CryptoService from Spring OneirosProperties (Spring Boot integration).
+     * Creates a CryptoService from Spring OneirosProperties (Spring Boot
+     * integration).
      *
      * @param properties the Spring configuration properties
      */
@@ -104,7 +109,7 @@ public class CryptoService {
     /**
      * Creates a CryptoService with explicit parameters.
      *
-     * @param enabled whether encryption is enabled
+     * @param enabled   whether encryption is enabled
      * @param keyString the encryption key (must be >= 8 characters if enabled)
      */
     public CryptoService(boolean enabled, String keyString) {
@@ -126,10 +131,12 @@ public class CryptoService {
     /**
      * Creates a CryptoService with a custom KeyProvider.
      *
-     * <p>Use this constructor for integration with external key management systems
+     * <p>
+     * Use this constructor for integration with external key management systems
      * like AWS KMS, Azure Key Vault, HashiCorp Vault, or HSMs.
      *
      * <h3>Example: AWS KMS Integration</h3>
+     * 
      * <pre>{@code
      * KeyProvider kmsProvider = new AwsKmsKeyProvider(kmsClient, keyArn);
      * CryptoService crypto = new CryptoService(kmsProvider);
@@ -171,19 +178,19 @@ public class CryptoService {
         return keyProvider != null ? keyProvider.getKeyId() : "disabled";
     }
 
-
     // ==================== Main API ====================
 
     /**
      * Encrypts or hashes the given value using the specified encryption type.
      *
      * @param plainText the value to encrypt/hash
-     * @param type the encryption type to use
-     * @param strength the strength/cost factor (-1 for default)
+     * @param type      the encryption type to use
+     * @param strength  the strength/cost factor (-1 for default)
      * @return the encrypted/hashed value
      */
     public String encrypt(String plainText, EncryptionType type, int strength) {
-        if (!enabled || plainText == null) return plainText;
+        if (!enabled || plainText == null)
+            return plainText;
 
         return switch (type) {
             case AES_GCM -> encryptAesGcm(plainText);
@@ -207,11 +214,12 @@ public class CryptoService {
      * For password hashes (ARGON2, BCRYPT, SCRYPT), use verify() instead.
      *
      * @param encryptedText the encrypted value
-     * @param type the encryption type used
+     * @param type          the encryption type used
      * @return the decrypted value, or the input if not decryptable
      */
     public String decrypt(String encryptedText, EncryptionType type) {
-        if (!enabled || encryptedText == null) return encryptedText;
+        if (!enabled || encryptedText == null)
+            return encryptedText;
 
         if (type == EncryptionType.AES_GCM) {
             return decryptAesGcm(encryptedText);
@@ -233,14 +241,15 @@ public class CryptoService {
      * Verifies a plaintext password against a stored hash.
      * Works for ARGON2, BCRYPT, SCRYPT, SHA256, SHA512.
      *
-     * @param plainText the plaintext password to check
+     * @param plainText   the plaintext password to check
      * @param hashedValue the stored hash
-     * @param type the hashing algorithm used
-     * @param strength the strength used during hashing (-1 for default)
+     * @param type        the hashing algorithm used
+     * @param strength    the strength used during hashing (-1 for default)
      * @return true if the password matches
      */
     public boolean verify(String plainText, String hashedValue, EncryptionType type, int strength) {
-        if (plainText == null || hashedValue == null) return false;
+        if (plainText == null || hashedValue == null)
+            return false;
 
         return switch (type) {
             case AES_GCM -> plainText.equals(decryptAesGcm(hashedValue));
@@ -299,7 +308,8 @@ public class CryptoService {
 
     private String decryptAesGcm(String encryptedText) {
         try {
-            // Validate Base64 before attempting decode (graceful fallback for unencrypted data)
+            // Validate Base64 before attempting decode (graceful fallback for unencrypted
+            // data)
             if (!isValidBase64(encryptedText)) {
                 log.trace("Skipping decryption - not valid Base64 (likely unencrypted data)");
                 return encryptedText;
@@ -344,7 +354,8 @@ public class CryptoService {
      * Checks if a string is valid Base64 encoded.
      * Used to detect unencrypted data in @OneirosEncrypted fields.
      *
-     * <p>This enables "write-side-only encryption" scenarios where some data
+     * <p>
+     * This enables "write-side-only encryption" scenarios where some data
      * (like system messages) are deliberately stored unencrypted, but use
      * the same entity model with @OneirosEncrypted annotations.
      *
@@ -366,15 +377,12 @@ public class CryptoService {
         int memory = strength > 0 ? strength : DEFAULT_ARGON2_MEMORY;
         String key = "argon2:" + memory;
 
-        return (Argon2PasswordEncoder) encoderCache.computeIfAbsent(key, k ->
-            new Argon2PasswordEncoder(
+        return (Argon2PasswordEncoder) encoderCache.computeIfAbsent(key, k -> new Argon2PasswordEncoder(
                 DEFAULT_ARGON2_SALT_LENGTH,
                 DEFAULT_ARGON2_HASH_LENGTH,
                 DEFAULT_ARGON2_PARALLELISM,
                 memory,
-                DEFAULT_ARGON2_ITERATIONS
-            )
-        );
+                DEFAULT_ARGON2_ITERATIONS));
     }
 
     private String hashArgon2(String plainText, int strength) {
@@ -387,9 +395,7 @@ public class CryptoService {
         int cost = (strength > 0 && strength >= 4 && strength <= 31) ? strength : DEFAULT_BCRYPT_STRENGTH;
         String key = "bcrypt:" + cost;
 
-        return (BCryptPasswordEncoder) encoderCache.computeIfAbsent(key, k ->
-            new BCryptPasswordEncoder(cost)
-        );
+        return (BCryptPasswordEncoder) encoderCache.computeIfAbsent(key, k -> new BCryptPasswordEncoder(cost));
     }
 
     private String hashBCrypt(String plainText, int strength) {
@@ -402,15 +408,12 @@ public class CryptoService {
         int cpuCost = strength > 0 ? strength : DEFAULT_SCRYPT_CPU_COST;
         String key = "scrypt:" + cpuCost;
 
-        return (SCryptPasswordEncoder) encoderCache.computeIfAbsent(key, k ->
-            new SCryptPasswordEncoder(
+        return (SCryptPasswordEncoder) encoderCache.computeIfAbsent(key, k -> new SCryptPasswordEncoder(
                 cpuCost,
                 DEFAULT_SCRYPT_MEMORY_COST,
                 DEFAULT_SCRYPT_PARALLELIZATION,
                 DEFAULT_SCRYPT_KEY_LENGTH,
-                DEFAULT_SCRYPT_SALT_LENGTH
-            )
-        );
+                DEFAULT_SCRYPT_SALT_LENGTH));
     }
 
     private String hashSCrypt(String plainText, int strength) {
@@ -462,4 +465,3 @@ public class CryptoService {
         return hash != null && hash.startsWith("$e0801$");
     }
 }
-

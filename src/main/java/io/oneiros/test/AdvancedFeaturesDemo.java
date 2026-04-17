@@ -7,7 +7,6 @@ import io.oneiros.graph.OneirosGraph;
 import io.oneiros.migration.OneirosMigrationEngine;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,14 +38,7 @@ public class AdvancedFeaturesDemo {
         @OneirosID
         private String id;
 
-        @OneirosField(
-            type = "string",
-            unique = true,
-            index = true,
-            indexName = "idx_user_email",
-            assertion = "string::len($value) > 5",
-            comment = "User email address"
-        )
+        @OneirosField(type = "string", unique = true, index = true, indexName = "idx_user_email", assertion = "string::len($value) > 5", comment = "User email address")
         private String email;
 
         @OneirosField(type = "string", readonly = false)
@@ -59,12 +51,9 @@ public class AdvancedFeaturesDemo {
         @OneirosField(type = "string", comment = "Encrypted password")
         private String password;
 
-        @OneirosRelation(
-            target = User.class,
-            type = OneirosRelation.RelationType.ONE_TO_MANY
-        )
+        @OneirosRelation(target = User.class, type = OneirosRelation.RelationType.ONE_TO_MANY)
         @OneirosField(type = "array<record<users>>")
-        private List<String> friends;  // Stores user:* record IDs
+        private List<String> friends; // Stores user:* record IDs
 
         @OneirosField(type = "datetime", defaultValue = "time::now()", readonly = true)
         private LocalDateTime createdAt;
@@ -107,10 +96,10 @@ public class AdvancedFeaturesDemo {
         private String id;
 
         @OneirosField(type = "record<users>")
-        private String in;  // User who purchased
+        private String in; // User who purchased
 
         @OneirosField(type = "record<products>")
-        private String out;  // Product that was purchased
+        private String out; // Product that was purchased
 
         @OneirosField(type = "float")
         private Double price;
@@ -123,7 +112,7 @@ public class AdvancedFeaturesDemo {
 
         @OneirosEncrypted
         @OneirosField(type = "string")
-        private String paymentToken;  // Encrypted payment info
+        private String paymentToken; // Encrypted payment info
     }
 
     // ============================================================
@@ -132,16 +121,16 @@ public class AdvancedFeaturesDemo {
 
     public static class UserRepository extends SimpleOneirosRepository<User, String> {
         public UserRepository(OneirosClient client,
-                            com.fasterxml.jackson.databind.ObjectMapper mapper,
-                            io.oneiros.security.CryptoService crypto) {
+                com.fasterxml.jackson.databind.ObjectMapper mapper,
+                io.oneiros.security.CryptoService crypto) {
             super(client, mapper, crypto);
         }
     }
 
     public static class ProductRepository extends SimpleOneirosRepository<Product, String> {
         public ProductRepository(OneirosClient client,
-                                com.fasterxml.jackson.databind.ObjectMapper mapper,
-                                io.oneiros.security.CryptoService crypto) {
+                com.fasterxml.jackson.databind.ObjectMapper mapper,
+                io.oneiros.security.CryptoService crypto) {
             super(client, mapper, crypto);
         }
     }
@@ -159,24 +148,24 @@ public class AdvancedFeaturesDemo {
         log.info("=== Example 1: Auto-Migration ===");
 
         OneirosMigrationEngine engine = new OneirosMigrationEngine(
-            client,
-            "io.oneiros.test",  // Base package to scan
-            true,               // Auto-migrate enabled
-            false               // Not a dry run
+                client,
+                "io.oneiros.test", // Base package to scan
+                true, // Auto-migrate enabled
+                false // Not a dry run
         );
 
         engine.migrate()
-            .doOnSuccess(v -> {
-                log.info("✅ Schema migration completed!");
-                log.info("   - Created 'users' table (SCHEMAFULL)");
-                log.info("   - Created 'products' table (SCHEMALESS)");
-                log.info("   - Created 'purchased' relation table");
-                log.info("   - Created 'user_history' table for versioning");
-                log.info("   - Created indexes on email field");
-                log.info("   - Generated assertions for price > 0");
-            })
-            .doOnError(e -> log.error("❌ Migration failed", e))
-            .subscribe();
+                .doOnSuccess(v -> {
+                    log.info("✅ Schema migration completed!");
+                    log.info("   - Created 'users' table (SCHEMAFULL)");
+                    log.info("   - Created 'products' table (SCHEMALESS)");
+                    log.info("   - Created 'purchased' relation table");
+                    log.info("   - Created 'user_history' table for versioning");
+                    log.info("   - Created indexes on email field");
+                    log.info("   - Generated assertions for price > 0");
+                })
+                .doOnError(e -> log.error("❌ Migration failed", e))
+                .subscribe();
     }
 
     /**
@@ -187,49 +176,49 @@ public class AdvancedFeaturesDemo {
 
         // Method 1: Using fluent API with Map
         graph.from(user)
-            .to(product)
-            .via("purchased")
-            .with("price", 999.99)
-            .with("quantity", 1)
-            .with("paymentToken", "tok_secret123")
-            .returnAfter()
-            .execute(Purchase.class)
-            .doOnSuccess(purchase -> {
-                log.info("✅ Created purchase relation: {}", purchase.getId());
-                log.info("   From: {}", purchase.getIn());
-                log.info("   To: {}", purchase.getOut());
-                log.info("   Price: €{}", purchase.getPrice());
-                log.info("   Payment token (encrypted): {}", purchase.getPaymentToken());
-            })
-            .subscribe();
+                .to(product)
+                .via("purchased")
+                .with("price", 999.99)
+                .with("quantity", 1)
+                .with("paymentToken", "tok_secret123")
+                .returnAfter()
+                .execute(Purchase.class)
+                .doOnSuccess(purchase -> {
+                    log.info("✅ Created purchase relation: {}", purchase.getId());
+                    log.info("   From: {}", purchase.getIn());
+                    log.info("   To: {}", purchase.getOut());
+                    log.info("   Price: €{}", purchase.getPrice());
+                    log.info("   Payment token (encrypted): {}", purchase.getPaymentToken());
+                })
+                .subscribe();
 
         // Method 2: Using entity object with automatic encryption
         Purchase purchaseData = new Purchase();
         purchaseData.setPrice(999.99);
         purchaseData.setQuantity(1);
-        purchaseData.setPaymentToken("tok_secret123");  // Will be encrypted
+        purchaseData.setPaymentToken("tok_secret123"); // Will be encrypted
 
         graph.from("user:alice")
-            .to("product:laptop")
-            .via("purchased")
-            .withEntity(purchaseData)  // Auto-encrypts @OneirosEncrypted fields
-            .returnAfter()
-            .execute(Purchase.class)
-            .doOnSuccess(purchase -> {
-                log.info("✅ Created purchase with entity object");
-            })
-            .subscribe();
+                .to("product:laptop")
+                .via("purchased")
+                .withEntity(purchaseData) // Auto-encrypts @OneirosEncrypted fields
+                .returnAfter()
+                .execute(Purchase.class)
+                .doOnSuccess(purchase -> {
+                    log.info("✅ Created purchase with entity object");
+                })
+                .subscribe();
 
         // Method 3: Without encryption (for non-sensitive data)
         graph.from("user:bob")
-            .to("product:mouse")
-            .via("purchased")
-            .withData(Map.of("price", 29.99, "quantity", 2))
-            .withoutEncryption()
-            .timeout("5s")
-            .execute()
-            .doOnSuccess(v -> log.info("✅ Purchase created (no encryption)"))
-            .subscribe();
+                .to("product:mouse")
+                .via("purchased")
+                .withData(Map.of("price", 29.99, "quantity", 2))
+                .withoutEncryption()
+                .timeout("5s")
+                .execute()
+                .doOnSuccess(v -> log.info("✅ Purchase created (no encryption)"))
+                .subscribe();
     }
 
     /**
@@ -242,25 +231,25 @@ public class AdvancedFeaturesDemo {
         String sql = "SELECT ->purchased->product AS purchases FROM user:alice";
 
         client.query(sql, Map.class)
-            .doOnNext(result -> {
-                log.info("📦 Alice's purchases:");
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> purchases = (List<Map<String, Object>>) result.get("purchases");
-                purchases.forEach(p -> log.info("   - {}", p));
-            })
-            .subscribe();
+                .doOnNext(result -> {
+                    log.info("📦 Alice's purchases:");
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> purchases = (List<Map<String, Object>>) result.get("purchases");
+                    purchases.forEach(p -> log.info("   - {}", p));
+                })
+                .subscribe();
 
         // Get all users who purchased a specific product
         sql = "SELECT <-purchased<-user AS buyers FROM product:laptop";
 
         client.query(sql, Map.class)
-            .doOnNext(result -> {
-                log.info("👥 Laptop buyers:");
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> buyers = (List<Map<String, Object>>) result.get("buyers");
-                buyers.forEach(b -> log.info("   - {}", b));
-            })
-            .subscribe();
+                .doOnNext(result -> {
+                    log.info("👥 Laptop buyers:");
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> buyers = (List<Map<String, Object>>) result.get("buyers");
+                    buyers.forEach(b -> log.info("   - {}", b));
+                })
+                .subscribe();
     }
 
     /**
@@ -278,37 +267,38 @@ public class AdvancedFeaturesDemo {
         user.setPassword("secret123");
 
         userRepo.save(user)
-            .flatMap(savedUser -> {
-                log.info("✅ Created user: {}", savedUser.getId());
+                .flatMap(savedUser -> {
+                    log.info("✅ Created user: {}", savedUser.getId());
 
-                // Update the user - old version will be saved to history
-                savedUser.setAge(26);
-                savedUser.setName("Alice Smith");
-                return userRepo.save(savedUser);
-            })
-            .flatMap(updatedUser -> {
-                log.info("✅ Updated user age to: {}", updatedUser.getAge());
+                    // Update the user - old version will be saved to history
+                    savedUser.setAge(26);
+                    savedUser.setName("Alice Smith");
+                    return userRepo.save(savedUser);
+                })
+                .flatMap(updatedUser -> {
+                    log.info("✅ Updated user age to: {}", updatedUser.getAge());
 
-                // Another update
-                updatedUser.setAge(27);
-                return userRepo.save(updatedUser);
-            })
-            .flatMap(finalUser -> {
-                log.info("✅ Updated user age again to: {}", finalUser.getAge());
+                    // Another update
+                    updatedUser.setAge(27);
+                    return userRepo.save(updatedUser);
+                })
+                .flatMap(finalUser -> {
+                    log.info("✅ Updated user age again to: {}", finalUser.getAge());
 
-                // Query history table to see all versions
-                String sql = "SELECT * FROM user_history WHERE record_id = " + finalUser.getId() + " ORDER BY timestamp DESC";
-                return client.query(sql, Map.class).collectList();
-            })
-            .doOnSuccess(history -> {
-                log.info("📜 Version history ({} versions):", history.size());
-                history.forEach(version -> {
-                    log.info("   - Event: {}", version.get("event_type"));
-                    log.info("     Timestamp: {}", version.get("timestamp"));
-                    log.info("     Data: {}", version.get("data"));
-                });
-            })
-            .subscribe();
+                    // Query history table to see all versions
+                    String sql = "SELECT * FROM user_history WHERE record_id = " + finalUser.getId()
+                            + " ORDER BY timestamp DESC";
+                    return client.query(sql, Map.class).collectList();
+                })
+                .doOnSuccess(history -> {
+                    log.info("📜 Version history ({} versions):", history.size());
+                    history.forEach(version -> {
+                        log.info("   - Event: {}", version.get("event_type"));
+                        log.info("     Timestamp: {}", version.get("timestamp"));
+                        log.info("     Data: {}", version.get("data"));
+                    });
+                })
+                .subscribe();
     }
 
     /**
@@ -319,22 +309,22 @@ public class AdvancedFeaturesDemo {
 
         // This will work - correct record types
         graph.from("user:alice")
-            .to("product:laptop")
-            .via("purchased")
-            .with("price", 999.99)
-            .execute()
-            .doOnSuccess(v -> log.info("✅ Valid relation created"))
-            .subscribe();
+                .to("product:laptop")
+                .via("purchased")
+                .with("price", 999.99)
+                .execute()
+                .doOnSuccess(v -> log.info("✅ Valid relation created"))
+                .subscribe();
 
         // This will fail - invalid target type (if strict mode enabled)
         graph.from("user:alice")
-            .to("invalid:wrong")  // Not a product record
-            .via("purchased")
-            .with("price", 999.99)
-            .execute()
-            .doOnSuccess(v -> log.info("❌ Should not happen"))
-            .doOnError(e -> log.error("✅ Correctly rejected invalid relation: {}", e.getMessage()))
-            .subscribe();
+                .to("invalid:wrong") // Not a product record
+                .via("purchased")
+                .with("price", 999.99)
+                .execute()
+                .doOnSuccess(v -> log.info("❌ Should not happen"))
+                .doOnError(e -> log.error("✅ Correctly rejected invalid relation: {}", e.getMessage()))
+                .subscribe();
     }
 
     /**
@@ -350,19 +340,19 @@ public class AdvancedFeaturesDemo {
         validUser.setAge(30);
 
         userRepo.save(validUser)
-            .doOnSuccess(u -> log.info("✅ Valid user saved: {}", u.getEmail()))
-            .subscribe();
+                .doOnSuccess(u -> log.info("✅ Valid user saved: {}", u.getEmail()))
+                .subscribe();
 
         // Invalid user - email too short (assertion will fail)
         User invalidUser = new User();
-        invalidUser.setEmail("a@b");  // Only 3 chars, assertion requires > 5
+        invalidUser.setEmail("a@b"); // Only 3 chars, assertion requires > 5
         invalidUser.setName("Invalid");
         invalidUser.setAge(30);
 
         userRepo.save(invalidUser)
-            .doOnSuccess(u -> log.info("❌ Should not happen"))
-            .doOnError(e -> log.error("✅ Correctly rejected invalid email: {}", e.getMessage()))
-            .subscribe();
+                .doOnSuccess(u -> log.info("❌ Should not happen"))
+                .doOnError(e -> log.error("✅ Correctly rejected invalid email: {}", e.getMessage()))
+                .subscribe();
     }
 
     /**
@@ -372,19 +362,19 @@ public class AdvancedFeaturesDemo {
         log.info("=== Example 7: SQL Generation ===");
 
         String sql = graph.from("user:alice")
-            .to("product:laptop")
-            .via("purchased")
-            .with("price", 999.99)
-            .with("quantity", 1)
-            .returnAfter()
-            .timeout("10s")
-            .toSql();
+                .to("product:laptop")
+                .via("purchased")
+                .with("price", 999.99)
+                .with("quantity", 1)
+                .returnAfter()
+                .timeout("10s")
+                .toSql();
 
         log.info("📝 Generated SurrealQL:");
         log.info("{}", sql);
         // Output: RELATE user:alice->purchased->product:laptop
-        //         CONTENT {"price":999.99,"quantity":1}
-        //         RETURN AFTER TIMEOUT 10s
+        // CONTENT {"price":999.99,"quantity":1}
+        // RETURN AFTER TIMEOUT 10s
     }
 
     // ============================================================
@@ -395,35 +385,35 @@ public class AdvancedFeaturesDemo {
      * 🎯 Key Features Demonstrated:
      *
      * 1️⃣ Auto-Migration:
-     *    ✅ Automatic DEFINE TABLE generation
-     *    ✅ DEFINE FIELD with types, constraints, assertions
-     *    ✅ DEFINE INDEX for unique/indexed fields
-     *    ✅ Relation type validation
-     *    ✅ History table creation for versioning
+     * ✅ Automatic DEFINE TABLE generation
+     * ✅ DEFINE FIELD with types, constraints, assertions
+     * ✅ DEFINE INDEX for unique/indexed fields
+     * ✅ Relation type validation
+     * ✅ History table creation for versioning
      *
      * 2️⃣ Graph & Relate API:
-     *    ✅ Fluent API: .from().to().via().with()
-     *    ✅ Automatic encryption on edges
-     *    ✅ Entity-based data mapping
-     *    ✅ Flexible return options (BEFORE/AFTER/DIFF)
-     *    ✅ Timeout support
+     * ✅ Fluent API: .from().to().via().with()
+     * ✅ Automatic encryption on edges
+     * ✅ Entity-based data mapping
+     * ✅ Flexible return options (BEFORE/AFTER/DIFF)
+     * ✅ Timeout support
      *
      * 3️⃣ Versioning (Time-Travel):
-     *    ✅ Automatic history tracking
-     *    ✅ Version metadata (user, timestamp, event type)
-     *    ✅ Configurable max versions
-     *    ✅ Full snapshots or diffs
+     * ✅ Automatic history tracking
+     * ✅ Version metadata (user, timestamp, event type)
+     * ✅ Configurable max versions
+     * ✅ Full snapshots or diffs
      *
      * 🔐 Security:
-     *    ✅ @OneirosEncrypted works on edges
-     *    ✅ Transparent encryption/decryption
-     *    ✅ Can be disabled per operation
+     * ✅ @OneirosEncrypted works on edges
+     * ✅ Transparent encryption/decryption
+     * ✅ Can be disabled per operation
      *
      * 🏗️ Architecture:
-     *    ✅ Non-blocking (Reactor Mono/Flux)
-     *    ✅ Modular design
-     *    ✅ Auto-configuration ready
-     *    ✅ Does not interfere with existing repositories
+     * ✅ Non-blocking (Reactor Mono/Flux)
+     * ✅ Modular design
+     * ✅ Auto-configuration ready
+     * ✅ Does not interfere with existing repositories
      */
 
     public static void main(String[] args) {
@@ -489,13 +479,13 @@ public class AdvancedFeaturesDemo {
         OneirosGraph mockGraph = new OneirosGraph(null, null, null);
 
         String relateSQL = "RELATE user:alice->purchased->product:laptop\n" +
-                          "  CONTENT {\n" +
-                          "    \"price\": 999.99,\n" +
-                          "    \"quantity\": 1,\n" +
-                          "    \"paymentToken\": \"<ENCRYPTED>\"\n" +
-                          "  }\n" +
-                          "  RETURN AFTER\n" +
-                          "  TIMEOUT 10s;";
+                "  CONTENT {\n" +
+                "    \"price\": 999.99,\n" +
+                "    \"quantity\": 1,\n" +
+                "    \"paymentToken\": \"<ENCRYPTED>\"\n" +
+                "  }\n" +
+                "  RETURN AFTER\n" +
+                "  TIMEOUT 10s;";
 
         log.info("   {}", relateSQL);
         log.info("");
@@ -577,64 +567,65 @@ public class AdvancedFeaturesDemo {
      * Requires SurrealDB running on localhost:8000.
      */
     /*
-    private static void runWithDatabase() {
-        log.info("🔌 Connecting to SurrealDB...");
-
-        // Setup
-        OneirosClient client = new OneirosClient(
-            "ws://127.0.0.1:8000/rpc",
-            "root", "root",
-            "test", "test"
-        );
-
-        com.fasterxml.jackson.databind.ObjectMapper mapper =
-            new com.fasterxml.jackson.databind.ObjectMapper();
-
-        io.oneiros.security.CryptoService crypto =
-            new io.oneiros.security.CryptoService("your-secret-key-here");
-
-        OneirosGraph graph = new OneirosGraph(client, mapper, crypto);
-
-        UserRepository userRepo = new UserRepository(client, mapper, crypto);
-        ProductRepository productRepo = new ProductRepository(client, mapper, crypto);
-
-        // Run examples
-        exampleAutoMigration(client);
-
-        // Create test data
-        User user = new User();
-        user.setEmail("alice@example.com");
-        user.setName("Alice");
-        user.setAge(25);
-        user.setPassword("secret123");
-
-        Product product = new Product();
-        product.setName("Laptop");
-        product.setPrice(999.99);
-        product.setStock(10);
-        product.setTags(List.of("electronics", "computers"));
-
-        userRepo.save(user)
-            .flatMap(savedUser -> productRepo.save(product)
-                .doOnSuccess(savedProduct -> {
-                    exampleGraphAPI(graph, savedUser, savedProduct);
-                    exampleQueryGraphRelations(client);
-                    exampleVersioning(userRepo, client);
-                    exampleRelationValidation(graph);
-                    exampleFieldValidation(userRepo);
-                })
-            )
-            .subscribe();
-
-        // Keep running to see async results
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt(); // Restore interrupt status
-            log.error("Thread interrupted while waiting for async results", e);
-        }
-
-        log.info("✅ All examples completed!");
-    }
-    */
+     * private static void runWithDatabase() {
+     * log.info("🔌 Connecting to SurrealDB...");
+     * 
+     * // Setup
+     * OneirosClient client = new OneirosClient(
+     * "ws://127.0.0.1:8000/rpc",
+     * "root", "root",
+     * "test", "test"
+     * );
+     * 
+     * com.fasterxml.jackson.databind.ObjectMapper mapper =
+     * new com.fasterxml.jackson.databind.ObjectMapper();
+     * 
+     * io.oneiros.security.CryptoService crypto =
+     * new io.oneiros.security.CryptoService("your-secret-key-here");
+     * 
+     * OneirosGraph graph = new OneirosGraph(client, mapper, crypto);
+     * 
+     * UserRepository userRepo = new UserRepository(client, mapper, crypto);
+     * ProductRepository productRepo = new ProductRepository(client, mapper,
+     * crypto);
+     * 
+     * // Run examples
+     * exampleAutoMigration(client);
+     * 
+     * // Create test data
+     * User user = new User();
+     * user.setEmail("alice@example.com");
+     * user.setName("Alice");
+     * user.setAge(25);
+     * user.setPassword("secret123");
+     * 
+     * Product product = new Product();
+     * product.setName("Laptop");
+     * product.setPrice(999.99);
+     * product.setStock(10);
+     * product.setTags(List.of("electronics", "computers"));
+     * 
+     * userRepo.save(user)
+     * .flatMap(savedUser -> productRepo.save(product)
+     * .doOnSuccess(savedProduct -> {
+     * exampleGraphAPI(graph, savedUser, savedProduct);
+     * exampleQueryGraphRelations(client);
+     * exampleVersioning(userRepo, client);
+     * exampleRelationValidation(graph);
+     * exampleFieldValidation(userRepo);
+     * })
+     * )
+     * .subscribe();
+     * 
+     * // Keep running to see async results
+     * try {
+     * Thread.sleep(5000);
+     * } catch (InterruptedException e) {
+     * Thread.currentThread().interrupt(); // Restore interrupt status
+     * log.error("Thread interrupted while waiting for async results", e);
+     * }
+     * 
+     * log.info("✅ All examples completed!");
+     * }
+     */
 }

@@ -104,8 +104,12 @@ class OneirosSecurityTest {
         // When: Encrypt for writing
         User encrypted = securityHandler.encryptOnWrite(user);
 
-        // Then: Same instance is returned (in-place modification)
-        assertSame(user, encrypted, "Should return same instance");
+        // Then: New instance is returned (for security, original remains plaintext)
+        assertNotSame(user, encrypted, "Should return a deep copy");
+        
+        // And: Original user is STILL PLAINTEXT (important for memory security)
+        assertEquals(originalApiKey, user.getApiKey(), "Original user must remain plaintext");
+        assertEquals(originalPassword, user.getPassword(), "Original user must remain plaintext");
 
         // And: Encrypted copy has ciphertext
         assertNotNull(encrypted.getApiKey(), "Encrypted apiKey should not be null");

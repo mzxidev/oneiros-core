@@ -17,8 +17,8 @@ public class StatementSystemTest {
         // Test 1: SELECT with all clauses
         try {
             var sql = SelectStatement.from(TestEntity.class)
-                    .where("role = 'ADMIN'")
-                    .and("status != 'DELETED'")
+                    .where("role", "=", "ADMIN")
+                    .and("status", "!=", "DELETED")
                     .omit("password")
                     .fetch("profile")
                     .groupBy("department")
@@ -30,8 +30,8 @@ public class StatementSystemTest {
             assertTrue(contains(sql, "SELECT *"));
             assertTrue(contains(sql, "OMIT password"));
             assertTrue(contains(sql, "FROM test_entity"));
-            assertTrue(contains(sql, "WHERE role = 'ADMIN'"));
-            assertTrue(contains(sql, "AND status != 'DELETED'"));
+            assertTrue(contains(sql, "WHERE role = $") || contains(sql, "WHERE role ="));
+            assertTrue(contains(sql, "AND status != $") || contains(sql, "AND status !="));
             assertTrue(contains(sql, "GROUP BY department"));
             assertTrue(contains(sql, "ORDER BY name ASC"));
             assertTrue(contains(sql, "LIMIT 10 START 20"));
@@ -48,12 +48,12 @@ public class StatementSystemTest {
         // Test 2: SELECT with EXPLAIN
         try {
             var sql = SelectStatement.from(TestEntity.class)
-                    .where("age > 18")
+                    .where("age", ">", 18)
                     .explain()
                     .toSql();
 
             assertTrue(sql.startsWith("EXPLAIN SELECT"));
-            assertTrue(contains(sql, "WHERE age > 18"));
+            assertTrue(contains(sql, "WHERE age > $") || contains(sql, "WHERE age >"));
 
             System.out.println("✅ Test 2: SELECT with EXPLAIN - PASSED");
             passed++;
@@ -82,7 +82,7 @@ public class StatementSystemTest {
         try {
             var sql = SelectStatement.from(TestEntity.class)
                     .select("name", "age", "email")
-                    .where("active = true")
+                    .where("active", "=", true)
                     .toSql();
 
             assertTrue(contains(sql, "SELECT name, age, email"));
@@ -134,12 +134,6 @@ public class StatementSystemTest {
     private static void assertTrue(boolean condition) {
         if (!condition) {
             throw new AssertionError("Condition was false");
-        }
-    }
-
-    private static void assertTrue(boolean condition, String message) {
-        if (!condition) {
-            throw new AssertionError(message);
         }
     }
 

@@ -3,7 +3,6 @@ package io.oneiros.audit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -13,35 +12,37 @@ import java.util.function.Consumer;
 /**
  * Central audit logging service for security events.
  *
- * <p>Provides:
+ * <p>
+ * Provides:
  * <ul>
- *   <li>Structured audit logging</li>
- *   <li>Multiple output handlers (file, SIEM, database)</li>
- *   <li>Event filtering by severity</li>
- *   <li>Compliance reporting</li>
+ * <li>Structured audit logging</li>
+ * <li>Multiple output handlers (file, SIEM, database)</li>
+ * <li>Event filtering by severity</li>
+ * <li>Compliance reporting</li>
  * </ul>
  *
  * <h3>Usage Example</h3>
+ * 
  * <pre>{@code
  * SecurityAuditLogger audit = SecurityAuditLogger.getInstance();
  *
  * // Log encryption event
  * audit.log(SecurityAuditEvent.builder()
- *     .type(EventType.ENCRYPTION)
- *     .action("encrypt_field")
- *     .resource("users.credit_card")
- *     .outcome(Outcome.SUCCESS)
- *     .build());
+ *         .type(EventType.ENCRYPTION)
+ *         .action("encrypt_field")
+ *         .resource("users.credit_card")
+ *         .outcome(Outcome.SUCCESS)
+ *         .build());
  *
  * // Log failed authentication
  * audit.log(SecurityAuditEvent.builder()
- *     .type(EventType.AUTHENTICATION)
- *     .action("signin")
- *     .principal("user@example.com")
- *     .outcome(Outcome.FAILURE)
- *     .severity(Severity.WARN)
- *     .errorMessage("Invalid credentials")
- *     .build());
+ *         .type(EventType.AUTHENTICATION)
+ *         .action("signin")
+ *         .principal("user@example.com")
+ *         .outcome(Outcome.FAILURE)
+ *         .severity(Severity.WARN)
+ *         .errorMessage("Invalid credentials")
+ *         .build());
  * }</pre>
  *
  * @since 0.4.3
@@ -108,12 +109,13 @@ public class SecurityAuditLogger {
     /**
      * Registers a custom event handler.
      *
-     * <p>Example handlers:
+     * <p>
+     * Example handlers:
      * <ul>
-     *   <li>Write to audit log file</li>
-     *   <li>Send to SIEM system</li>
-     *   <li>Store in database</li>
-     *   <li>Send alerts for critical events</li>
+     * <li>Write to audit log file</li>
+     * <li>Send to SIEM system</li>
+     * <li>Store in database</li>
+     * <li>Send alerts for critical events</li>
      * </ul>
      *
      * @param handler the event handler
@@ -121,6 +123,15 @@ public class SecurityAuditLogger {
     public void registerHandler(Consumer<SecurityAuditEvent> handler) {
         handlers.add(handler);
         log.debug("Registered audit handler: {}", handler.getClass().getSimpleName());
+    }
+
+    /**
+     * Removes all registered handlers except the default SLF4J handler.
+     * Useful for test isolation.
+     */
+    public void clearHandlers() {
+        handlers.clear();
+        registerHandler(this::logToSlf4j);
     }
 
     /**
@@ -220,8 +231,7 @@ public class SecurityAuditLogger {
                 .severity(SecurityAuditEvent.Severity.WARN)
                 .metadata(Map.of(
                         "oldVersion", String.valueOf(oldVersion),
-                        "newVersion", String.valueOf(newVersion)
-                ))
+                        "newVersion", String.valueOf(newVersion)))
                 .build());
     }
 
@@ -251,8 +261,7 @@ public class SecurityAuditLogger {
                 .severity(SecurityAuditEvent.Severity.WARN)
                 .metadata(Map.of(
                         "requested", String.valueOf(requested),
-                        "available", String.valueOf(available)
-                ))
+                        "available", String.valueOf(available)))
                 .build());
     }
 
@@ -268,8 +277,7 @@ public class SecurityAuditLogger {
                 .severity(SecurityAuditEvent.Severity.WARN)
                 .metadata(Map.of(
                         "oldValue", oldValue,
-                        "newValue", newValue
-                ))
+                        "newValue", newValue))
                 .build());
     }
 }

@@ -75,12 +75,13 @@ public class IntegratedQueryDemoRunner {
         try {
             String sql = OneirosQuery.update(User.class)
                 .set("verified", true)
-                .where("email = 'alice@example.com'")
+                .where("email", "=", "alice@example.com")
                 .toSql();
 
             assertTrue(sql.contains("UPDATE user"));
             assertTrue(sql.contains("SET verified = true"));
-            assertTrue(sql.contains("WHERE email = 'alice@example.com'"));
+            assertTrue(sql.contains("WHERE email ="));
+            assertTrue(sql.contains("$p"));  // parameterized placeholder
 
             System.out.println("✅ Test 3: Statement API - UPDATE - PASSED");
             System.out.println("   SQL: " + sql + "\n");
@@ -96,7 +97,7 @@ public class IntegratedQueryDemoRunner {
         total++;
         try {
             String sql = OneirosQuery.delete(User.class)
-                .where("age < 18")
+                .where("age", "<", 18)
                 .toSql();
 
             System.out.println("DEBUG Test 4 SQL: " + sql);
@@ -104,7 +105,8 @@ public class IntegratedQueryDemoRunner {
             // SurrealDB allows both "DELETE table" and "DELETE FROM table" syntax
             assertTrue(sql.contains("DELETE"));
             assertTrue(sql.contains("users"));
-            assertTrue(sql.contains("WHERE age < 18"));
+            assertTrue(sql.contains("WHERE age <"));
+            assertTrue(sql.contains("$p"));  // parameterized placeholder
 
             System.out.println("✅ Test 4: Statement API - DELETE - PASSED");
             System.out.println("   SQL: " + sql + "\n");
@@ -122,12 +124,13 @@ public class IntegratedQueryDemoRunner {
             String sql = OneirosQuery.upsert(User.class)
                 .set("name", "Bob")
                 .set("email", "bob@example.com")
-                .where("email = 'bob@example.com'")
+                .where("email", "=", "bob@example.com")
                 .toSql();
 
             assertTrue(sql.contains("UPSERT user"));
             assertTrue(sql.contains("SET name = 'Bob'"));
-            assertTrue(sql.contains("WHERE email = 'bob@example.com'"));
+            assertTrue(sql.contains("WHERE email ="));
+            assertTrue(sql.contains("$p"));  // parameterized placeholder
 
             System.out.println("✅ Test 5: Statement API - UPSERT - PASSED");
             System.out.println("   SQL: " + sql + "\n");
@@ -387,12 +390,17 @@ public class IntegratedQueryDemoRunner {
         // ==================================================================================
         total++;
         try {
+            // setRaw() and whereRaw() are intentional: expressions reference only SurrealDB
+            // LET variables (not user input), so injection risk is absent.
+            @SuppressWarnings("deprecation")
+            var balanceUpdate = OneirosQuery.update(User.class)
+                .setRaw("balance -= $amount")
+                .whereRaw("id = user:alice");
+
             String sql = OneirosQuery.transaction()
                 .add(OneirosQuery.let("amount", "100"))
                 .add(OneirosQuery.create(User.class).set("balance", "1000"))
-                .add(OneirosQuery.update(User.class)
-                    .setRaw("balance -= $amount")
-                    .where("id = user:alice"))
+                .add(balanceUpdate)
                 .returnValue("{ success: true, amount: $amount }")
                 .toSql();
 

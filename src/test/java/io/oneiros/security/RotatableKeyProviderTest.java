@@ -48,13 +48,13 @@ class RotatableKeyProviderTest {
     @Test
     @DisplayName("Should maintain key history with limit")
     void shouldMaintainKeyHistoryWithLimit() {
-        RotatableKeyProvider provider = new RotatableKeyProvider("key-v1", 3);
+        RotatableKeyProvider provider = new RotatableKeyProvider("key-v1-long-enough", 3);
 
         // Rotate 5 times
-        provider.rotateKey("key-v2");
-        provider.rotateKey("key-v3");
-        provider.rotateKey("key-v4");
-        provider.rotateKey("key-v5");
+        provider.rotateKey("key-v2-long-enough");
+        provider.rotateKey("key-v3-long-enough");
+        provider.rotateKey("key-v4-long-enough");
+        provider.rotateKey("key-v5-long-enough");
 
         // Should only keep last 3 versions (3, 4, 5)
         assertEquals(3, provider.getKeyHistorySize());
@@ -68,7 +68,7 @@ class RotatableKeyProviderTest {
     @Test
     @DisplayName("Should decrypt with old key version")
     void shouldDecryptWithOldKeyVersion() {
-        RotatableKeyProvider provider = new RotatableKeyProvider("key-v1");
+        RotatableKeyProvider provider = new RotatableKeyProvider("key-v1-long-enough");
         CryptoService crypto = new CryptoService(provider);
 
         // Encrypt with v1
@@ -76,7 +76,7 @@ class RotatableKeyProviderTest {
         String encrypted = crypto.encrypt(plaintext);
 
         // Rotate to v2
-        provider.rotateKey("key-v2");
+        provider.rotateKey("key-v2-long-enough");
         assertEquals("2", provider.getKeyVersion());
 
         // Should still decrypt data encrypted with v1
@@ -102,8 +102,8 @@ class RotatableKeyProviderTest {
     @Test
     @DisplayName("Should clear keys on close")
     void shouldClearKeysOnClose() {
-        RotatableKeyProvider provider = new RotatableKeyProvider("key-123");
-        provider.rotateKey("key-456");
+        RotatableKeyProvider provider = new RotatableKeyProvider("key-123-long-enough");
+        provider.rotateKey("key-456-long-enough");
 
         assertEquals(2, provider.getKeyHistorySize());
 
@@ -115,8 +115,8 @@ class RotatableKeyProviderTest {
     @Test
     @DisplayName("Should provide metadata")
     void shouldProvideMetadata() {
-        RotatableKeyProvider provider = new RotatableKeyProvider("key-123", 5);
-        provider.rotateKey("key-456");
+        RotatableKeyProvider provider = new RotatableKeyProvider("key-123-long-enough", 5);
+        provider.rotateKey("key-456-long-enough");
 
         var metadata = provider.getMetadata();
         assertTrue(metadata.isPresent());
@@ -127,9 +127,9 @@ class RotatableKeyProviderTest {
     @Test
     @DisplayName("Should track available versions")
     void shouldTrackAvailableVersions() {
-        RotatableKeyProvider provider = new RotatableKeyProvider("key-1");
-        provider.rotateKey("key-2");
-        provider.rotateKey("key-3");
+        RotatableKeyProvider provider = new RotatableKeyProvider("key-version-1");
+        provider.rotateKey("key-version-2");
+        provider.rotateKey("key-version-3");
 
         var versions = provider.getAvailableVersions();
         assertEquals(3, versions.size());

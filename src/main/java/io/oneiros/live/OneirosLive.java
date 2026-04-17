@@ -1,6 +1,5 @@
 package io.oneiros.live;
 
-import io.oneiros.client.OneirosClient;
 import reactor.core.publisher.Flux;
 
 /**
@@ -8,21 +7,21 @@ import reactor.core.publisher.Flux;
  * Provides a chainable interface for building real-time subscriptions.
  *
  * Example:
+ * 
  * <pre>
  * OneirosLive.from(Product.class, client)
- *     .where("price").lessThan(100)
- *     .where("category").is("electronics")
- *     .subscribe()
- *     .subscribe(event -> {
- *         if (event.isCreate()) {
- *             System.out.println("New product: " + event.getData());
- *         }
- *     });
+ *         .where("price").lessThan(100)
+ *         .where("category").is("electronics")
+ *         .subscribe()
+ *         .subscribe(event -> {
+ *             if (event.isCreate()) {
+ *                 System.out.println("New product: " + event.getData());
+ *             }
+ *         });
  * </pre>
  */
 public class OneirosLive<T> {
 
-    private final OneirosClient client;
     private final OneirosLiveManager liveManager;
     private final Class<T> entityClass;
     private final String tableName;
@@ -30,8 +29,7 @@ public class OneirosLive<T> {
     private StringBuilder whereClause = new StringBuilder();
     private boolean hasWhere = false;
 
-    public OneirosLive(OneirosClient client, OneirosLiveManager liveManager, Class<T> entityClass, String tableName) {
-        this.client = client;
+    public OneirosLive(OneirosLiveManager liveManager, Class<T> entityClass, String tableName) {
         this.liveManager = liveManager;
         this.entityClass = entityClass;
         this.tableName = tableName;
@@ -41,26 +39,26 @@ public class OneirosLive<T> {
      * Creates a LIVE SELECT builder for the specified entity class.
      *
      * @param entityClass The entity class
-     * @param client The Oneiros client
-     * @param <T> The entity type
+     * @param liveManager The live query manager
+     * @param <T>         The entity type
      * @return A new OneirosLive builder
      */
-    public static <T> OneirosLive<T> from(Class<T> entityClass, OneirosClient client, OneirosLiveManager liveManager) {
+    public static <T> OneirosLive<T> from(Class<T> entityClass, OneirosLiveManager liveManager) {
         String tableName = extractTableName(entityClass);
-        return new OneirosLive<>(client, liveManager, entityClass, tableName);
+        return new OneirosLive<>(liveManager, entityClass, tableName);
     }
 
     /**
      * Creates a LIVE SELECT builder for the specified table name.
      *
-     * @param tableName The table name
+     * @param tableName   The table name
      * @param entityClass The entity class
-     * @param client The Oneiros client
-     * @param <T> The entity type
+     * @param liveManager The live query manager
+     * @param <T>         The entity type
      * @return A new OneirosLive builder
      */
-    public static <T> OneirosLive<T> table(String tableName, Class<T> entityClass, OneirosClient client, OneirosLiveManager liveManager) {
-        return new OneirosLive<>(client, liveManager, entityClass, tableName);
+    public static <T> OneirosLive<T> table(String tableName, Class<T> entityClass, OneirosLiveManager liveManager) {
+        return new OneirosLive<>(liveManager, entityClass, tableName);
     }
 
     /**
@@ -126,7 +124,8 @@ public class OneirosLive<T> {
         public OneirosLive<T> in(Object... values) {
             StringBuilder inClause = new StringBuilder(field + " IN [");
             for (int i = 0; i < values.length; i++) {
-                if (i > 0) inClause.append(", ");
+                if (i > 0)
+                    inClause.append(", ");
                 inClause.append(formatValue(values[i]));
             }
             inClause.append("]");
@@ -135,7 +134,7 @@ public class OneirosLive<T> {
         }
 
         public OneirosLive<T> like(String pattern) {
-            addCondition(field + " ~ '" + pattern + "'");
+            addCondition(field + " ~ '" + escapeString(pattern) + "'");
             return OneirosLive.this;
         }
 
@@ -179,23 +178,24 @@ public class OneirosLive<T> {
      * Escapes special characters in a string to prevent SQL injection.
      */
     private String escapeString(String value) {
-        if (value == null) return "";
+        if (value == null)
+            return "";
         return value
-            .replace("\\", "\\\\")  // Backslash first!
-            .replace("'", "\\'")    // Single quotes
-            .replace("\"", "\\\"")  // Double quotes
-            .replace("\n", "\\n")   // Newlines
-            .replace("\r", "\\r")   // Carriage returns
-            .replace("\t", "\\t")   // Tabs
-            .replace("\0", "");     // Remove null bytes
+                .replace("\\", "\\\\") // Backslash first!
+                .replace("'", "\\'") // Single quotes
+                .replace("\"", "\\\"") // Double quotes
+                .replace("\n", "\\n") // Newlines
+                .replace("\r", "\\r") // Carriage returns
+                .replace("\t", "\\t") // Tabs
+                .replace("\0", ""); // Remove null bytes
     }
 
     /**
      * Extracts the table name from an entity class.
      */
     private static <T> String extractTableName(Class<T> entityClass) {
-        io.oneiros.annotation.OneirosEntity annotation =
-            entityClass.getAnnotation(io.oneiros.annotation.OneirosEntity.class);
+        io.oneiros.annotation.OneirosEntity annotation = entityClass
+                .getAnnotation(io.oneiros.annotation.OneirosEntity.class);
 
         if (annotation != null && !annotation.value().isBlank()) {
             return annotation.value();

@@ -7,18 +7,21 @@ import io.oneiros.client.OneirosWebsocketClient;
 import io.oneiros.config.OneirosProperties;
 import io.oneiros.core.OneirosConfig;
 import io.oneiros.transaction.OneirosTransaction;
+import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -26,16 +29,35 @@ import java.util.function.Function;
  * Connection pool for managing multiple WebSocket connections to SurrealDB.
  * Provides load balancing, health checking, and automatic reconnection.
  *
- * <p>Supports both framework-agnostic {@link OneirosConfig} and Spring-based {@link OneirosProperties}.
+ * <p>
+ * Supports both framework-agnostic {@link OneirosConfig} and Spring-based
+ * {@link OneirosProperties}.
  */
 public class OneirosConnectionPool implements OneirosClient {
 
     private static final Logger log = LoggerFactory.getLogger(OneirosConnectionPool.class);
 
+    // Modern Java 21+ Virtual Thread Scheduler for maintenance tasks
+    private static final Scheduler VIRTUAL_THREAD_SCHEDULER = Schedulers.fromExecutor(
+            Executors.newVirtualThreadPerTaskExecutor()
+    );
+
     // Framework-agnostic configuration
     private final OneirosConfig config;
 
-    // Spring-specific (kept for backward compatibility)
+    /**
+     * -- GETTER --
+     *  Returns the original Spring
+     *  this pool was
+     *  constructed with,
+     *  or
+     *  if the pool was constructed from a framework-agnostic
+     *
+     * .
+     */
+    // Spring-specific: non-null only when the Spring constructor was used;
+    // null when constructed from OneirosConfig directly.
+    @Getter
     private final OneirosProperties properties;
 
     private final ObjectMapper objectMapper;
@@ -66,51 +88,49 @@ public class OneirosConnectionPool implements OneirosClient {
             OneirosConfig config,
             ObjectMapper objectMapper,
             CircuitBreaker circuitBreaker,
-            int poolSize
-    ) {
+            int poolSize) {
         this.config = config;
         this.properties = null;
         this.objectMapper = objectMapper;
         this.circuitBreaker = circuitBreaker;
         this.poolSize = poolSize;
         this.healthCheckIntervalSeconds = config.getPool() != null
-            ? config.getPool().getHealthCheckInterval()
-            : 30;
+                ? config.getPool().getHealthCheckInterval()
+                : 30;
         this.maxPendingRequests = config.getPool() != null
-            ? config.getPool().getMaxPendingRequests()
-            : 1000;
+                ? config.getPool().getMaxPendingRequests()
+                : 1000;
 
         // Initialize rate limiter if enabled
         if (config.getPool() != null && config.getPool().isRateLimitEnabled()) {
             this.rateLimiter = new RateLimiter(
-                config.getPool().getRateLimitMaxRequests(),
-                Duration.ofSeconds(config.getPool().getRateLimitIntervalSeconds())
-            );
+                    config.getPool().getRateLimitMaxRequests(),
+                    Duration.ofSeconds(config.getPool().getRateLimitIntervalSeconds()));
             log.info("✅ Rate limiting enabled: {} requests per {} seconds",
-                config.getPool().getRateLimitMaxRequests(),
-                config.getPool().getRateLimitIntervalSeconds());
+                    config.getPool().getRateLimitMaxRequests(),
+                    config.getPool().getRateLimitIntervalSeconds());
         } else {
             this.rateLimiter = null;
         }
     }
 
     /**
-     * Creates a connection pool from Spring OneirosProperties (backward compatibility).
+     * Creates a connection pool from Spring OneirosProperties (backward
+     * compatibility).
      */
     public OneirosConnectionPool(
             OneirosProperties properties,
             ObjectMapper objectMapper,
             CircuitBreaker circuitBreaker,
-            int poolSize
-    ) {
+            int poolSize) {
         this.properties = properties;
         this.config = OneirosConfig.fromProperties(properties);
         this.objectMapper = objectMapper;
         this.circuitBreaker = circuitBreaker;
         this.poolSize = poolSize;
         this.healthCheckIntervalSeconds = properties.getPool() != null
-            ? properties.getPool().getHealthCheckInterval()
-            : 30;
+                ? properties.getPool().getHealthCheckInterval()
+                : 30;
         this.maxPendingRequests = 1000; // Default for Spring properties
         this.rateLimiter = null; // Rate limiting not available for Spring properties (use OneirosConfig)
     }
@@ -132,53 +152,53 @@ public class OneirosConnectionPool implements OneirosClient {
 
         // Create connections sequentially using concatMap to ensure proper ordering
         return Flux.range(1, poolSize)
-            .concatMap(i -> createConnection()
-                .doOnSuccess(conn -> {
-                    connections.add(conn);
-                    log.info("✅ Connection #{}/{} added to pool", i, poolSize);
+                .concatMap(i -> createConnection()
+                        .doOnSuccess(conn -> {
+                            connections.add(conn);
+                            log.info("✅ Connection #{}/{} added to pool", i, poolSize);
+                        })
+                        .onErrorResume(error -> {
+                            log.error("❌ Failed to create connection #{}: {}", i, error.getMessage());
+                            // Continue with other connections even if one fails
+                            return Mono.empty();
+                        })
+                        // Important: Add small delay between connections to prevent race conditions
+                        .delayElement(Duration.ofMillis(50)))
+                .then()
+                .doOnSuccess(v -> {
+                    if (connections.isEmpty()) {
+                        IllegalStateException error = new IllegalStateException(
+                                "Failed to establish any connections to SurrealDB. " +
+                                        "Please check your configuration and that SurrealDB is running.");
+                        readySink.tryEmitError(error);
+                        throw error;
+                    }
+
+                    initialized = true;
+                    log.info("🏊 Connection pool initialized with {}/{} connections ({}% success rate)",
+                            connections.size(), poolSize, (connections.size() * 100 / poolSize));
+
+                    if (connections.size() < poolSize) {
+                        log.warn("⚠️ Pool initialized with fewer connections than requested. " +
+                                "Some connections failed to establish.");
+                    }
+
+                    // Start framework-agnostic health check scheduler
+                    startHealthCheckScheduler();
+
+                    // Signal that pool is ready
+                    readySink.tryEmitValue(null);
                 })
-                .onErrorResume(error -> {
-                    log.error("❌ Failed to create connection #{}: {}", i, error.getMessage());
-                    // Continue with other connections even if one fails
-                    return Mono.empty();
-                })
-                // Important: Add small delay between connections to prevent race conditions
-                .delayElement(Duration.ofMillis(50))
-            )
-            .then()
-            .doOnSuccess(v -> {
-                if (connections.isEmpty()) {
-                    IllegalStateException error = new IllegalStateException(
-                        "Failed to establish any connections to SurrealDB. " +
-                        "Please check your configuration and that SurrealDB is running.");
+                .doOnError(error -> {
+                    log.error("❌ Pool initialization failed: {}", error.getMessage());
                     readySink.tryEmitError(error);
-                    throw error;
-                }
-
-                initialized = true;
-                log.info("🏊 Connection pool initialized with {}/{} connections ({}% success rate)",
-                    connections.size(), poolSize, (connections.size() * 100 / poolSize));
-
-                if (connections.size() < poolSize) {
-                    log.warn("⚠️ Pool initialized with fewer connections than requested. " +
-                             "Some connections failed to establish.");
-                }
-
-                // Start framework-agnostic health check scheduler
-                startHealthCheckScheduler();
-
-                // Signal that pool is ready
-                readySink.tryEmitValue(null);
-            })
-            .doOnError(error -> {
-                log.error("❌ Pool initialization failed: {}", error.getMessage());
-                readySink.tryEmitError(error);
-            });
+                });
     }
 
     /**
      * Wait until the pool is ready to accept queries.
-     * This is used by clients that need to ensure the pool is initialized before making requests.
+     * This is used by clients that need to ensure the pool is initialized before
+     * making requests.
      */
     public Mono<Void> waitUntilReady() {
         if (initialized) {
@@ -193,26 +213,25 @@ public class OneirosConnectionPool implements OneirosClient {
      */
     private Mono<PooledConnection> createConnection() {
         OneirosWebsocketClient client = new OneirosWebsocketClient(
-            config,
-            objectMapper,
-            circuitBreaker
-        );
+                config,
+                objectMapper,
+                circuitBreaker);
 
         return client.connect()
-            .then(Mono.defer(() -> {
-                if (!client.isConnected()) {
-                    return Mono.error(new IllegalStateException("Client failed to establish connection"));
-                }
-                log.debug("✅ New connection established and verified");
-                return Mono.just(new PooledConnection(client));
-            }))
-            .timeout(Duration.ofSeconds(15))
-            .doOnError(e -> {
-                log.error("Failed to create connection: {}", e.getMessage());
-                if (e.getCause() != null) {
-                    log.error("Root cause: {}", e.getCause().getMessage());
-                }
-            });
+                .then(Mono.defer(() -> {
+                    if (!client.isConnected()) {
+                        return Mono.error(new IllegalStateException("Client failed to establish connection"));
+                    }
+                    log.debug("✅ New connection established and verified");
+                    return Mono.just(new PooledConnection(client));
+                }))
+                .timeout(Duration.ofSeconds(15))
+                .doOnError(e -> {
+                    log.error("Failed to create connection: {}", e.getMessage());
+                    if (e.getCause() != null) {
+                        log.error("Root cause: {}", e.getCause().getMessage());
+                    }
+                });
     }
 
     /**
@@ -225,8 +244,7 @@ public class OneirosConnectionPool implements OneirosClient {
         if (rateLimiter != null && !rateLimiter.tryAcquire()) {
             log.warn("🚫 Rate limit exceeded");
             return Mono.error(new RateLimitExceededException(
-                "Rate limit exceeded. Please retry later."
-            ));
+                    "Rate limit exceeded. Please retry later."));
         }
 
         // Backpressure: Check if pool is overloaded
@@ -245,24 +263,24 @@ public class OneirosConnectionPool implements OneirosClient {
         }
 
         List<PooledConnection> healthyConnections = connections.stream()
-            .filter(PooledConnection::isHealthy)
-            .toList();
+                .filter(PooledConnection::isHealthy)
+                .toList();
 
         if (healthyConnections.isEmpty()) {
             log.warn("⚠️ No healthy connections available, attempting recovery");
             return recoverConnection()
-                .doFinally(signal -> pendingRequestCount.decrementAndGet());
+                    .doFinally(signal -> pendingRequestCount.decrementAndGet());
         }
 
         int index = Math.abs(roundRobinIndex.getAndIncrement() % healthyConnections.size());
         PooledConnection selected = healthyConnections.get(index);
 
         log.debug("🎯 Selected connection #{} (health: {}, pending: {}/{})",
-            connections.indexOf(selected) + 1, selected.getStatus(), pending + 1, maxPendingRequests);
+                connections.indexOf(selected) + 1, selected.getStatus(), pending + 1, maxPendingRequests);
 
         // Decrement counter when request completes (success or error)
         return Mono.just(selected)
-            .doFinally(signal -> pendingRequestCount.decrementAndGet());
+                .doFinally(signal -> pendingRequestCount.decrementAndGet());
     }
 
     /**
@@ -270,18 +288,18 @@ public class OneirosConnectionPool implements OneirosClient {
      */
     private Mono<PooledConnection> recoverConnection() {
         PooledConnection unhealthy = connections.stream()
-            .filter(conn -> conn.getStatus() == PooledConnection.Status.UNHEALTHY)
-            .findFirst()
-            .orElse(null);
+                .filter(conn -> conn.getStatus() == PooledConnection.Status.UNHEALTHY)
+                .findFirst()
+                .orElse(null);
 
         if (unhealthy != null) {
             log.info("🔄 Attempting to reconnect unhealthy connection");
             return unhealthy.reconnect()
-                .thenReturn(unhealthy)
-                .onErrorResume(error -> {
-                    log.error("❌ Reconnection failed: {}", error.getMessage());
-                    return createNewConnection();
-                });
+                    .thenReturn(unhealthy)
+                    .onErrorResume(error -> {
+                        log.error("❌ Reconnection failed: {}", error.getMessage());
+                        return createNewConnection();
+                    });
         }
 
         return createNewConnection();
@@ -293,25 +311,25 @@ public class OneirosConnectionPool implements OneirosClient {
     private Mono<PooledConnection> createNewConnection() {
         log.info("➕ Creating new connection to replace failed one");
         return createConnection()
-                .publishOn(Schedulers.boundedElastic())
-            .doOnSuccess(newConn -> {
-                if (connections.size() < poolSize) {
-                    connections.add(newConn);
-                    log.info("✅ New connection added to pool");
-                } else {
-                    PooledConnection oldest = connections.stream()
-                        .filter(conn -> !conn.isHealthy())
-                        .findFirst()
-                        .orElse(null);
-
-                    if (oldest != null) {
-                        connections.remove(oldest);
+                .publishOn(VIRTUAL_THREAD_SCHEDULER)
+                .doOnSuccess(newConn -> {
+                    if (connections.size() < poolSize) {
                         connections.add(newConn);
-                        oldest.close().subscribe(); // Cleanup old connection
-                        log.info("✅ Replaced unhealthy connection");
+                        log.info("✅ New connection added to pool");
+                    } else {
+                        PooledConnection oldest = connections.stream()
+                                .filter(conn -> !conn.isHealthy())
+                                .findFirst()
+                                .orElse(null);
+
+                        if (oldest != null) {
+                            connections.remove(oldest);
+                            connections.add(newConn);
+                            oldest.close().subscribe(); // Cleanup old connection
+                            log.info("✅ Replaced unhealthy connection");
+                        }
                     }
-                }
-            });
+                });
     }
 
     /**
@@ -325,55 +343,54 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public <T> Flux<T> query(String sql, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().query(sql, resultType)
-                .doOnError(error -> {
-                    log.error("❌ Query failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                })
-                .doOnComplete(conn::resetFailureCount));
+                .flatMapMany(conn -> conn.getClient().query(sql, resultType)
+                        .doOnError(error -> {
+                            log.error("❌ Query failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        })
+                        .doOnComplete(conn::resetFailureCount));
     }
 
     @Override
     public <T> Flux<T> query(String sql, Map<String, Object> params, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().query(sql, params, resultType)
-                .doOnError(error -> {
-                    log.error("❌ Query failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                })
-                .doOnComplete(conn::resetFailureCount));
+                .flatMapMany(conn -> conn.getClient().query(sql, params, resultType)
+                        .doOnError(error -> {
+                            log.error("❌ Query failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        })
+                        .doOnComplete(conn::resetFailureCount));
     }
 
     @Override
     public Flux<Map<String, Object>> listenToLiveQuery(String liveQueryId) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().listenToLiveQuery(liveQueryId)
-                .doOnError(error -> {
-                    log.error("❌ Live query failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                }));
+                .flatMapMany(conn -> conn.getClient().listenToLiveQuery(liveQueryId)
+                        .doOnError(error -> {
+                            log.error("❌ Live query failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        }));
     }
 
     @Override
     public Mono<String> live(String table, boolean diff) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().live(table, diff)
-                .doOnError(error -> {
-                    log.error("❌ Live query start failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                }));
+                .flatMap(conn -> conn.getClient().live(table, diff)
+                        .doOnError(error -> {
+                            log.error("❌ Live query start failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        }));
     }
 
     @Override
     public Mono<Void> kill(String liveQueryId) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().kill(liveQueryId)
-                .doOnError(error -> {
-                    log.error("❌ Kill live query failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                }));
+                .flatMap(conn -> conn.getClient().kill(liveQueryId)
+                        .doOnError(error -> {
+                            log.error("❌ Kill live query failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        }));
     }
-
 
     @Override
     public <T> Mono<T> transaction(Function<OneirosTransaction, Mono<T>> transactionBlock) {
@@ -390,21 +407,21 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public Mono<Void> let(String name, Object value) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().let(name, value)
-                .doOnError(error -> {
-                    log.error("❌ Let variable failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                }));
+                .flatMap(conn -> conn.getClient().let(name, value)
+                        .doOnError(error -> {
+                            log.error("❌ Let variable failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        }));
     }
 
     @Override
     public Mono<Void> unset(String name) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().unset(name)
-                .doOnError(error -> {
-                    log.error("❌ Unset variable failed on connection: {}", error.getMessage());
-                    conn.incrementFailureCount();
-                }));
+                .flatMap(conn -> conn.getClient().unset(name)
+                        .doOnError(error -> {
+                            log.error("❌ Unset variable failed on connection: {}", error.getMessage());
+                            conn.incrementFailureCount();
+                        }));
     }
 
     // ============================================================
@@ -414,55 +431,55 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public Mono<Void> authenticate(String token) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().authenticate(token));
+                .flatMap(conn -> conn.getClient().authenticate(token));
     }
 
     @Override
     public Mono<String> signin(Map<String, Object> credentials) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().signin(credentials));
+                .flatMap(conn -> conn.getClient().signin(credentials));
     }
 
     @Override
     public Mono<String> signup(Map<String, Object> credentials) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().signup(credentials));
+                .flatMap(conn -> conn.getClient().signup(credentials));
     }
 
     @Override
     public Mono<Void> invalidate() {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().invalidate());
+                .flatMap(conn -> conn.getClient().invalidate());
     }
 
     @Override
     public <T> Mono<T> info(Class<T> resultType) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().info(resultType));
+                .flatMap(conn -> conn.getClient().info(resultType));
     }
 
     @Override
     public Mono<Void> reset() {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().reset());
+                .flatMap(conn -> conn.getClient().reset());
     }
 
     @Override
     public Mono<Void> ping() {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().ping());
+                .flatMap(conn -> conn.getClient().ping());
     }
 
     @Override
     public Mono<Map<String, Object>> version() {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().version());
+                .flatMap(conn -> conn.getClient().version());
     }
 
     @Override
     public Mono<Void> use(String namespace, String database) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().use(namespace, database));
+                .flatMap(conn -> conn.getClient().use(namespace, database));
     }
 
     // ============================================================
@@ -472,64 +489,64 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public <T> Flux<T> select(String thing, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().select(thing, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().select(thing, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> select(String thing, Map<String, Object> options, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().select(thing, options, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().select(thing, options, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Mono<T> create(String thing, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().create(thing, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMap(conn -> conn.getClient().create(thing, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> insert(String thing, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().insert(thing, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().insert(thing, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> update(String thing, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().update(thing, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().update(thing, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> upsert(String thing, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().upsert(thing, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().upsert(thing, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> merge(String thing, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().merge(thing, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().merge(thing, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public Flux<Map<String, Object>> patch(String thing, List<Map<String, Object>> patches, boolean returnDiff) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().patch(thing, patches, returnDiff)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().patch(thing, patches, returnDiff)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Flux<T> delete(String thing, Class<T> resultType) {
         return selectConnection()
-            .flatMapMany(conn -> conn.getClient().delete(thing, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMapMany(conn -> conn.getClient().delete(thing, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     // ============================================================
@@ -539,15 +556,15 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public <T> Mono<T> relate(String in, String relation, String out, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().relate(in, relation, out, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMap(conn -> conn.getClient().relate(in, relation, out, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Mono<T> insertRelation(String table, Object data, Class<T> resultType) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().insertRelation(table, data, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMap(conn -> conn.getClient().insertRelation(table, data, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     // ============================================================
@@ -557,15 +574,15 @@ public class OneirosConnectionPool implements OneirosClient {
     @Override
     public Mono<Map<String, Object>> graphql(Object query, Map<String, Object> options) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().graphql(query, options)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMap(conn -> conn.getClient().graphql(query, options)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     @Override
     public <T> Mono<T> run(String functionName, String version, List<Object> args, Class<T> resultType) {
         return selectConnection()
-            .flatMap(conn -> conn.getClient().run(functionName, version, args, resultType)
-                .doOnError(error -> conn.incrementFailureCount()));
+                .flatMap(conn -> conn.getClient().run(functionName, version, args, resultType)
+                        .doOnError(error -> conn.incrementFailureCount()));
     }
 
     /**
@@ -582,13 +599,13 @@ public class OneirosConnectionPool implements OneirosClient {
         }
 
         return Flux.fromIterable(connections)
-            .flatMap(PooledConnection::close)
-            .then()
-            .doFinally(signal -> {
-                connections.clear();
-                initialized = false;
-                log.info("✅ Connection pool shut down");
-            });
+                .flatMap(PooledConnection::close)
+                .then()
+                .doFinally(signal -> {
+                    connections.clear();
+                    initialized = false;
+                    log.info("✅ Connection pool shut down");
+                });
     }
 
     /**
@@ -601,8 +618,8 @@ public class OneirosConnectionPool implements OneirosClient {
         }
 
         healthCheckScheduler = Flux.interval(Duration.ofSeconds(healthCheckIntervalSeconds))
-            .publishOn(Schedulers.boundedElastic())
-            .subscribe(tick -> performHealthCheck());
+                .publishOn(VIRTUAL_THREAD_SCHEDULER)
+                .subscribe(tick -> performHealthCheck());
 
         log.debug("🏥 Health check scheduler started (interval: {}s)", healthCheckIntervalSeconds);
     }
@@ -620,13 +637,13 @@ public class OneirosConnectionPool implements OneirosClient {
         log.debug("🏥 Performing health check on {} connections", connections.size());
 
         Flux.fromIterable(connections)
-            .flatMap(conn -> conn.healthCheck()
-                .doOnNext(healthy -> {
-                    if (!healthy) {
-                        log.warn("⚠️ Connection unhealthy, will attempt recovery");
-                    }
-                }))
-            .subscribe();
+                .flatMap(conn -> conn.healthCheck()
+                        .doOnNext(healthy -> {
+                            if (!healthy) {
+                                log.warn("⚠️ Connection unhealthy, will attempt recovery");
+                            }
+                        }))
+                .subscribe();
     }
 
     /**
@@ -637,11 +654,10 @@ public class OneirosConnectionPool implements OneirosClient {
         long unhealthy = connections.stream().filter(conn -> !conn.isHealthy()).count();
 
         return new PoolStats(
-            connections.size(),
-            (int) healthy,
-            (int) unhealthy,
-            poolSize
-        );
+                connections.size(),
+                (int) healthy,
+                (int) unhealthy,
+                poolSize);
     }
 
     /**
@@ -649,7 +665,8 @@ public class OneirosConnectionPool implements OneirosClient {
      * This always uses the first healthy connection in the pool,
      * ensuring all operations execute on the same connection.
      *
-     * <p>Use this for operations that require sequential execution
+     * <p>
+     * Use this for operations that require sequential execution
      * on the same connection, such as schema migrations.
      *
      * @return A wrapper that delegates all calls to a single fixed connection
@@ -662,7 +679,8 @@ public class OneirosConnectionPool implements OneirosClient {
 
     /**
      * Wrapper that provides access to a single dedicated connection from the pool.
-     * All operations are routed to the same connection to ensure sequential execution.
+     * All operations are routed to the same connection to ensure sequential
+     * execution.
      */
     private static class DedicatedConnectionWrapper implements OneirosClient {
         private final OneirosConnectionPool pool;
@@ -676,9 +694,9 @@ public class OneirosConnectionPool implements OneirosClient {
             if (dedicatedConnection == null || !dedicatedConnection.isHealthy()) {
                 // Find first healthy connection
                 dedicatedConnection = pool.connections.stream()
-                    .filter(PooledConnection::isHealthy)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("No healthy connections available"));
+                        .filter(PooledConnection::isHealthy)
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException("No healthy connections available"));
             }
             return dedicatedConnection.getClient();
         }
@@ -701,163 +719,163 @@ public class OneirosConnectionPool implements OneirosClient {
         @Override
         public <T> Flux<T> query(String sql, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.query(sql, resultType));
+                    .flatMapMany(client -> client.query(sql, resultType));
         }
 
         @Override
         public <T> Flux<T> query(String sql, Map<String, Object> params, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.query(sql, params, resultType));
+                    .flatMapMany(client -> client.query(sql, params, resultType));
         }
 
         @Override
         public <T> Flux<T> select(String thing, Map<String, Object> options, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.select(thing, options, resultType));
+                    .flatMapMany(client -> client.select(thing, options, resultType));
         }
 
         @Override
         public Mono<Void> authenticate(String token) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.authenticate(token));
+                    .flatMap(client -> client.authenticate(token));
         }
 
         @Override
         public Mono<String> signin(Map<String, Object> credentials) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.signin(credentials));
+                    .flatMap(client -> client.signin(credentials));
         }
 
         @Override
         public Mono<String> signup(Map<String, Object> credentials) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.signup(credentials));
+                    .flatMap(client -> client.signup(credentials));
         }
 
         @Override
         public Mono<Void> invalidate() {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(OneirosClient::invalidate);
+                    .flatMap(OneirosClient::invalidate);
         }
 
         @Override
         public <T> Mono<T> info(Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.info(resultType));
+                    .flatMap(client -> client.info(resultType));
         }
 
         @Override
         public Mono<Void> reset() {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(OneirosClient::reset);
+                    .flatMap(OneirosClient::reset);
         }
 
         @Override
         public Mono<Void> ping() {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(OneirosClient::ping);
+                    .flatMap(OneirosClient::ping);
         }
 
         @Override
         public Mono<Map<String, Object>> version() {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(OneirosClient::version);
+                    .flatMap(OneirosClient::version);
         }
 
         @Override
         public Mono<Void> use(String namespace, String database) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.use(namespace, database));
+                    .flatMap(client -> client.use(namespace, database));
         }
 
         @Override
         public Mono<Void> let(String name, Object value) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.let(name, value));
+                    .flatMap(client -> client.let(name, value));
         }
 
         @Override
         public Mono<Void> unset(String name) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.unset(name));
+                    .flatMap(client -> client.unset(name));
         }
 
         @Override
         public <T> Flux<T> select(String thing, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.select(thing, resultType));
+                    .flatMapMany(client -> client.select(thing, resultType));
         }
 
         @Override
         public <T> Mono<T> create(String thing, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.create(thing, data, resultType));
+                    .flatMap(client -> client.create(thing, data, resultType));
         }
 
         @Override
         public <T> Flux<T> insert(String thing, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.insert(thing, data, resultType));
+                    .flatMapMany(client -> client.insert(thing, data, resultType));
         }
 
         @Override
         public <T> Flux<T> upsert(String thing, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.upsert(thing, data, resultType));
+                    .flatMapMany(client -> client.upsert(thing, data, resultType));
         }
 
         @Override
         public <T> Flux<T> update(String thing, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.update(thing, data, resultType));
+                    .flatMapMany(client -> client.update(thing, data, resultType));
         }
 
         @Override
         public <T> Flux<T> merge(String thing, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.merge(thing, data, resultType));
+                    .flatMapMany(client -> client.merge(thing, data, resultType));
         }
 
         @Override
         public Flux<Map<String, Object>> patch(String thing, List<Map<String, Object>> patches, boolean returnDiff) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.patch(thing, patches, returnDiff));
+                    .flatMapMany(client -> client.patch(thing, patches, returnDiff));
         }
 
         @Override
         public <T> Flux<T> delete(String thing, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.delete(thing, resultType));
+                    .flatMapMany(client -> client.delete(thing, resultType));
         }
 
         @Override
         public <T> Mono<T> relate(String in, String relation, String out, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.relate(in, relation, out, data, resultType));
+                    .flatMap(client -> client.relate(in, relation, out, data, resultType));
         }
 
         @Override
         public <T> Mono<T> insertRelation(String table, Object data, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.insertRelation(table, data, resultType));
+                    .flatMap(client -> client.insertRelation(table, data, resultType));
         }
 
         @Override
         public Mono<String> live(String table, boolean diff) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.live(table, diff));
+                    .flatMap(client -> client.live(table, diff));
         }
 
         @Override
         public Flux<Map<String, Object>> listenToLiveQuery(String liveQueryId) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.listenToLiveQuery(liveQueryId));
+                    .flatMapMany(client -> client.listenToLiveQuery(liveQueryId));
         }
 
         @Override
         public Mono<Void> kill(String liveQueryId) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.kill(liveQueryId));
+                    .flatMap(client -> client.kill(liveQueryId));
         }
 
         @Override
@@ -868,34 +886,33 @@ public class OneirosConnectionPool implements OneirosClient {
         @Override
         public <T> Mono<T> transaction(Function<OneirosTransaction, Mono<T>> transactionBlock) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.transaction(transactionBlock));
+                    .flatMap(client -> client.transaction(transactionBlock));
         }
 
         @Override
         public <T> Flux<T> transactionMany(Function<OneirosTransaction, Flux<T>> transactionBlock) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMapMany(client -> client.transactionMany(transactionBlock));
+                    .flatMapMany(client -> client.transactionMany(transactionBlock));
         }
 
         @Override
         public <T> Mono<T> run(String functionName, String version, List<Object> args, Class<T> resultType) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.run(functionName, version, args, resultType));
+                    .flatMap(client -> client.run(functionName, version, args, resultType));
         }
 
         @Override
         public Mono<Map<String, Object>> graphql(Object query, Map<String, Object> options) {
             return Mono.fromCallable(this::getOrCreateDedicatedClient)
-                .flatMap(client -> client.graphql(query, options));
+                    .flatMap(client -> client.graphql(query, options));
         }
     }
 
     public record PoolStats(
-        int total,
-        int healthy,
-        int unhealthy,
-        int maxSize
-    ) {
+            int total,
+            int healthy,
+            int unhealthy,
+            int maxSize) {
         public double healthPercentage() {
             return total > 0 ? (double) healthy / total * 100 : 0;
         }

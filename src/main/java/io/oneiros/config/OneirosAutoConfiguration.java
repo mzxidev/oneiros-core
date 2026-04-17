@@ -86,8 +86,8 @@ public class OneirosAutoConfiguration {
             if ("CLOSED".equals(to)) color = GREEN; // Alles gut -> Grün
             if ("OPEN".equals(to)) color = RED + BOLD; // ALARM -> Rot Fett
 
-            // Das exakte Format, das du wolltest:
-            System.out.println(color + "[ONEIROS SHIELD] 🛡️ State changed from " + from + " to " + to + RESET);
+            // Das exakte Format, das du wolltest (jetzt mit info Logger):
+            log.info("{}[ONEIROS SHIELD] 🛡️ State changed from {} to {}{}", color, from, to, RESET);
         });
 
         return breaker;
@@ -138,13 +138,13 @@ public class OneirosAutoConfiguration {
 
         // 🔥 AUTO-CONNECT: Establish connection immediately on startup
         if (properties.isAutoConnect()) {
-            System.out.println(GREEN + "🚀 Oneiros auto-connecting to SurrealDB..." + RESET);
+            log.info("{}🚀 Oneiros auto-connecting to SurrealDB...{}", GREEN, RESET);
             client.connect()
-                .doOnSuccess(v -> System.out.println(GREEN + "✅ Oneiros connected successfully!" + RESET))
-                .doOnError(e -> System.err.println(RED + "❌ Oneiros connection failed: " + e.getMessage() + RESET))
+                .doOnSuccess(v -> log.info("{}✅ Oneiros connected successfully!{}", GREEN, RESET))
+                .doOnError(e -> log.error("{}❌ Oneiros connection failed: {}{}", RED, e.getMessage(), RESET))
                 .subscribe();
         } else {
-            System.out.println(YELLOW + "⏳ Oneiros will connect on first request (lazy mode)" + RESET);
+            log.info("{}⏳ Oneiros will connect on first request (lazy mode){}", YELLOW, RESET);
         }
 
         return client;
@@ -204,11 +204,13 @@ public class OneirosAutoConfiguration {
 
     /**
      * Graph API bean for fluent RELATE statement building.
+     * SCOPE: Prototype to ensure thread-safety since it has mutable builder state.
      */
     @Bean
+    @org.springframework.context.annotation.Scope("prototype")
     @ConditionalOnMissingBean
     public OneirosGraph oneirosGraph(OneirosClient client, ObjectMapper mapper, CryptoService crypto) {
-        log.debug("🔗 Initializing Oneiros Graph API");
+        log.debug("🔗 Initializing new Oneiros Graph API instance");
         return new OneirosGraph(client, mapper, crypto);
     }
 
