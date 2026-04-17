@@ -19,7 +19,7 @@ public abstract class BackgroundWorkerEssence implements Essence {
         // Or just start when the first database is ready
         kernel.events().listen(OneirosCoreEvent.EssenceReady.class)
             .filter(this::shouldStartOn)
-            .firstWithSignal()
+            .next()
             .subscribe(event -> {
                 log.info("🚀 Background Worker '{}' starting (triggered by {})", getId(), event.essenceId());
                 this.taskDisposable = startTask(kernel);
