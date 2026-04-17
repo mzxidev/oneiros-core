@@ -6,10 +6,8 @@ plugins {
     id 'signing'
 }
 
-// Update the group to reflect a GitHub namespace since you don't have a domain.
-// Replace "mzxidev" with your actual GitHub username.
 group = 'io.github.mzxidev'
-version = '0.5.1'
+version = '0.5.2'
 
 java {
     toolchain {
@@ -19,7 +17,6 @@ java {
     withJavadocJar()
 }
 
-
 repositories {
     mavenLocal()
     mavenCentral()
@@ -27,37 +24,41 @@ repositories {
 }
 
 dependencies {
-    api 'org.springframework.boot:spring-boot-starter-webflux:3.4.13'
-    api 'org.springframework.boot:spring-boot-starter-actuator:3.4.13'
+    // ==== Spring Boot ====
+    api 'org.springframework.boot:spring-boot-starter-webflux:4.0.4'
+    api 'org.springframework.boot:spring-boot-starter-actuator:4.0.4'
+    implementation 'org.springframework:spring-websocket:6.2.12'
 
+    // ==== Jackson ====
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.18.2'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.18.2'
-    implementation 'org.springframework:spring-websocket:6.2.2'
-    implementation 'io.github.resilience4j:resilience4j-reactor:2.2.0'
 
+    // ==== Resilience4j & Caching ====
+    implementation 'io.github.resilience4j:resilience4j-reactor:2.2.0'
     implementation 'io.github.resilience4j:resilience4j-spring-boot3:2.2.0'
     implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
 
-    // Security - Password hashing (Argon2, BCrypt, SCrypt)
+    // ==== Security ====
     implementation 'org.springframework.security:spring-security-crypto:6.4.2'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.79'
 
-    // LZ4 Compression for backup functionality
+    // ==== Compression ====
     implementation 'org.lz4:lz4-java:1.8.0'
 
+    // ==== Utilities ====
+    implementation 'io.github.classgraph:classgraph:4.8.179'
+
+    // ==== Lombok ====
     compileOnly 'org.projectlombok:lombok:1.18.38'
     annotationProcessor 'org.projectlombok:lombok:1.18.38'
     testCompileOnly 'org.projectlombok:lombok:1.18.38'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.38'
 
-    implementation 'io.github.classgraph:classgraph:4.8.179'
-
-
+    // ==== Testing ====
     testImplementation 'org.springframework.boot:spring-boot-starter-test:3.4.13'
-    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testImplementation platform('org.junit:junit-bom:5.11.4')
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.11.4'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.11.4'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.assertj:assertj-core:3.27.0'
     testImplementation 'io.projectreactor:reactor-test:3.7.1'
@@ -67,8 +68,24 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    
     // SECURITY & COMPATIBILITY: Enable experimental support for Java 26+ in Byte Buddy/Mockito
     systemProperty 'net.bytebuddy.experimental', 'true'
+    
+    // ADVANCED: Detailed test logging to see kernel startup and output in the console
+    testLogging {
+        events "passed", "skipped", "failed", "standardOut", "standardError"
+        showStandardStreams = true
+        exceptionFormat = 'full'
+        showCauses = true
+        showStackTraces = true
+    }
+}
+
+// ADVANCED: Strict compiler arguments for better code quality
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs << "-parameters" << "-Xlint:unchecked" << "-Xlint:deprecation"
 }
 
 tasks.named('jar') {
@@ -78,6 +95,7 @@ tasks.named('jar') {
 // Ignore Javadoc errors to allow publishing
 tasks.withType(Javadoc).configureEach {
     options.addStringOption('Xdoclint:none', '-quiet')
+    options.encoding = 'UTF-8'
     failOnError = false
 }
 
@@ -98,7 +116,7 @@ publishing {
                 licenses {
                     license {
                         name = 'The Apache License, Version 2.0'
-                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
                     }
                 }
 
@@ -132,7 +150,10 @@ publishing {
 }
 
 signing {
-    required { !project.version.endsWith('-SNAPSHOT') && gradle.taskGraph.hasTask("publish") }
-    useGpgCmd()
-    sign publishing.publications.mavenJava
+    def isJitPack = System.getenv("JITPACK") == "true"
+    required { !isJitPack && !project.version.endsWith('-SNAPSHOT') && gradle.taskGraph.hasTask("publish") }
+    // Removed useGpgCmd() to use standard internal Gradle signer via gradle.properties
+    if (!isJitPack) {
+        sign publishing.publications.mavenJava
+    }
 }

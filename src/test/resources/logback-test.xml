@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- ADVANCED LOGGING FOR TESTS -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- A nice pattern showing time, thread, level, class and message -->
+            <pattern>%cyan(%d{HH:mm:ss.SSS}) %magenta([%thread]) %highlight(%-5level) %yellow(%logger{36}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Set root level -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+    <!-- Detailed logging for our core kernel package to see the startup process -->
+    <logger name="io.oneiros.core" level="DEBUG" />
+
+    <!-- Silence some verbose Spring/Reactor logs during tests to focus on Oneiros Kernel -->
+    <logger name="org.springframework" level="WARN" />
+    <logger name="reactor.netty" level="WARN" />
+</configuration>
