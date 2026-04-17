@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Duration;
 
 /**
- * Demo for Real-time & Performance Features:
+ * Demo for Real-time &amp; Performance Features:
  * - Live Queries (LIVE SELECT)
  * - Connection Pooling with Load Balancing
  * - Full-Text Search API

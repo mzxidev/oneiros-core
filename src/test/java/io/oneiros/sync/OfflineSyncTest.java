@@ -24,8 +24,9 @@ class OfflineSyncTest {
     void setUp() {
         mockRemote = mock(OneirosClient.class);
         mockLocal = mock(OneirosClient.class);
-        eventBus = InternalEventBus.getInstance();
-        hybridClient = new OneirosHybridClient(mockRemote, mockLocal);
+        // Create a PRIVATE event bus for this test to avoid singleton interference
+        eventBus = new InternalEventBus();
+        hybridClient = new OneirosHybridClient(mockRemote, mockLocal, eventBus);
     }
 
     @Test

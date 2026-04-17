@@ -27,11 +27,16 @@ public class OneirosHybridClient implements OneirosClient {
     private final OneirosClient remoteClient;
     private final OneirosClient localClient;
     private final Queue<SyncOperation> syncQueue = new ConcurrentLinkedQueue<>();
-    private final InternalEventBus eventBus = InternalEventBus.getInstance();
+    private final InternalEventBus eventBus;
 
     public OneirosHybridClient(OneirosClient remoteClient, OneirosClient localClient) {
+        this(remoteClient, localClient, InternalEventBus.getInstance());
+    }
+
+    public OneirosHybridClient(OneirosClient remoteClient, OneirosClient localClient, InternalEventBus eventBus) {
         this.remoteClient = remoteClient;
         this.localClient = localClient;
+        this.eventBus = eventBus;
 
         eventBus.listen(OneirosEvent.Connected.class)
                 .subscribe(e -> synchronize());

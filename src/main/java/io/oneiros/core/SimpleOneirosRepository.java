@@ -244,21 +244,24 @@ public abstract class SimpleOneirosRepository<T, ID> implements ReactiveOneirosR
     }
 
     /**
-     * Creates a shallow copy of the entity for safe encryption during save().
-     * This ensures the original reference is not mutated.
+     * Creates a true deep copy of the entity via Jackson serialization round-trip.
+     *
+     * <p>MED-1 FIX: The previous implementation used field-by-field assignment which only
+     * copied references (shallow copy). Nested objects (List, Map, nested entities) shared
+     * the same reference as the original. If any nested field was annotated with
+     * {@code @OneirosEncrypted}, the original could still be mutated indirectly.
+     *
+     * <p>Jackson round-trip guarantees every object in the graph is a fresh instance.
      */
+    @SuppressWarnings("unchecked")
     private T deepCopy(T entity) {
         if (entity == null)
             return null;
         try {
-            T copy = (T) entityType.getDeclaredConstructor().newInstance();
-            for (Field field : entityType.getDeclaredFields()) {
-                field.setAccessible(true);
-                field.set(copy, field.get(entity));
-            }
-            return copy;
+            String json = mapper.writeValueAsString(entity);
+            return (T) mapper.readValue(json, entityType);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to copy entity for " + entityType.getSimpleName(), e);
+            throw new RuntimeException("Failed to deep-copy entity for " + entityType.getSimpleName(), e);
         }
     }
 

@@ -53,7 +53,7 @@ public class WhereClause implements Clause {
      * }</pre>
      *
      * @param field the field name
-     * @param operator the comparison operator (=, !=, >, <, >=, <=, LIKE, IN)
+     * @param operator the comparison operator ({@code =}, {@code !=}, {@code >}, {@code <}, {@code >=}, {@code <=}, LIKE, IN)
      * @param value the value (will be parameterized)
      * @return this clause for chaining
      */

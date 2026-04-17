@@ -283,6 +283,10 @@ public class OneirosLiveManager {
 
     /**
      * Automatically decrypts @OneirosEncrypted fields.
+     *
+     * <p>MED-2 FIX: Only fields annotated with {@code EncryptionType.AES_GCM} are
+     * decrypted. One-way hashes (ARGON2, BCRYPT, SCRYPT, SHA256/512) are intentionally
+     * left as-is — attempting to "decrypt" them would produce errors or garbage.
      */
     private <T> void decryptEncryptedFields(T entity) {
         if (entity == null || cryptoService == null) {
@@ -292,6 +296,14 @@ public class OneirosLiveManager {
         try {
             for (Field field : entity.getClass().getDeclaredFields()) {
                 if (field.isAnnotationPresent(io.oneiros.annotation.OneirosEncrypted.class)) {
+                    io.oneiros.annotation.OneirosEncrypted annotation =
+                            field.getAnnotation(io.oneiros.annotation.OneirosEncrypted.class);
+
+                    // MED-2 FIX: Only reverse-decrypt AES_GCM — skip one-way hashes
+                    if (annotation.type() != io.oneiros.security.EncryptionType.AES_GCM) {
+                        continue;
+                    }
+
                     field.setAccessible(true);
                     Object value = field.get(entity);
 
@@ -414,7 +426,26 @@ public class OneirosLiveManager {
             return this;
         }
 
+        /**
+         * Adds a raw WHERE clause string.
+         *
+         * <p><strong>CRIT-2:</strong> This method accepts raw strings and performs only
+         * basic character-whitelist validation. Prefer the parameterized
+         * {@code WhereClause} API when available to fully eliminate injection risk.
+         *
+         * @throws SecurityException if the clause contains characters outside the safe set
+         * @deprecated Prefer a parameterized WhereClause builder to eliminate injection risk.
+         */
+        @Deprecated(since = "0.5.0", forRemoval = false)
         public LiveSelectBuilder<T> where(String whereClause) {
+            // CRIT-2 FIX: Basic whitelist — allow only safe characters in raw WHERE strings
+            // Blocks: semicolons, backticks, comments (--), multi-statement injection
+            if (whereClause != null && !whereClause.isBlank()) {
+                if (!whereClause.matches("^[\\w\\s=<>!.,':@()\\-+*/]+$")) {
+                    throw new SecurityException(
+                            "WHERE clause contains potentially unsafe characters. Use parameterized queries instead.");
+                }
+            }
             this.whereClause = whereClause;
             return this;
         }

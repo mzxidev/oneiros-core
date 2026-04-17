@@ -480,6 +480,12 @@ public class OneirosBackupManager {
 
     /**
      * Insert batch of records.
+     *
+     * <p>CRIT-3 FIX: Previously built SQL via string concatenation
+     * ({@code "CREATE " + table + " CONTENT " + json}) which is vulnerable to
+     * SurrealQL injection if backup data is tampered with. Now uses the typed
+     * {@code client.create()} RPC call which sends structured data without
+     * building a raw SQL string.
      */
     private Mono<Void> insertBatch(String table, List<Map<String, Object>> batch) {
         // SECURITY: Validate table name
@@ -487,14 +493,10 @@ public class OneirosBackupManager {
 
         return Flux.fromIterable(batch)
                 .flatMap(record -> {
-                    try {
-                        String json = objectMapper.writeValueAsString(record);
-                        String sql = "CREATE " + table + " CONTENT " + json;
-                        return client.query(sql, Void.class);
-                    } catch (Exception e) {
-                        log.warn("Failed to insert record into {}: {}", table, e.getMessage());
-                        return Mono.empty();
-                    }
+                    // CRIT-3 FIX: Use typed RPC instead of raw SQL concatenation
+                    return client.create(table, record, Map.class)
+                            .doOnError(e -> log.warn("Failed to insert record into {}: {}", table, e.getMessage()))
+                            .onErrorResume(e -> Mono.empty());
                 })
                 .then();
     }
@@ -572,6 +574,11 @@ public class OneirosBackupManager {
     /**
      * SECURITY: Generates SHA-256 checksum for a file.
      *
+     * <p>MIN-4 FIX: Previous implementation used {@code Files.readAllBytes()} which
+     * loads the entire file into heap memory. For backups &gt; 500 MB this can cause
+     * {@code OutOfMemoryError}. Now uses a streaming {@code BufferedInputStream}
+     * that feeds the digest 8 KB at a time.
+     *
      * @param file the file to hash
      * @return Base64-encoded SHA-256 checksum
      * @throws IOException if file cannot be read
@@ -579,9 +586,14 @@ public class OneirosBackupManager {
     private String generateChecksum(File file) throws IOException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] fileBytes = Files.readAllBytes(file.toPath());
-            byte[] hash = digest.digest(fileBytes);
-            return Base64.getEncoder().encodeToString(hash);
+            byte[] buf = new byte[8192];
+            int read;
+            try (InputStream is = new BufferedInputStream(new FileInputStream(file))) {
+                while ((read = is.read(buf)) > 0) {
+                    digest.update(buf, 0, read);
+                }
+            }
+            return Base64.getEncoder().encodeToString(digest.digest());
         } catch (java.security.NoSuchAlgorithmException e) {
             throw new RuntimeException("SHA-256 algorithm not available", e);
         }

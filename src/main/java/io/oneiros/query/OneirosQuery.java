@@ -475,7 +475,7 @@ public class OneirosQuery<T> {
      * 
      * <pre>
      * OneirosQuery.delete(User.class)
-     *         .where("age < 18")
+     *         .where("age {@code <} 18")
      *         .execute(client);
      * </pre>
      */

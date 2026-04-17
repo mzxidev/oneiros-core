@@ -121,24 +121,37 @@ public class OneirosGraph {
     /**
      * Set data from an edge entity object.
      * Scans for @OneirosEncrypted fields if encryption is enabled.
+     *
+     * <p>SECURITY: The original entity is never mutated. A Jackson-based deep copy
+     * is created first, so an exception during encryption cannot leave the caller's
+     * object in an inconsistent (partially-encrypted) state.
      */
+    @SuppressWarnings("unchecked")
     public OneirosGraph withEntity(Object edgeEntity) {
         try {
+            // CRIT-1 FIX: Use Jackson round-trip as true deep copy instead of mutating original
+            Object copy = deepCopy(edgeEntity);
+
             if (encryptionEnabled) {
-                processEncryption(edgeEntity, true);
+                processEncryption(copy, true);
             }
 
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = mapper.convertValue(edgeEntity, Map.class);
+            Map<String, Object> map = mapper.convertValue(copy, Map.class);
             this.edgeData.putAll(map);
-
-            if (encryptionEnabled) {
-                processEncryption(edgeEntity, false);
-            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to convert edge entity to map", e);
         }
         return this;
+    }
+
+    /**
+     * Creates a true deep copy of an entity via Jackson serialization round-trip.
+     * This ensures no references are shared between the copy and the original.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> T deepCopy(T entity) throws Exception {
+        String json = mapper.writeValueAsString(entity);
+        return (T) mapper.readValue(json, entity.getClass());
     }
 
     /**
@@ -183,9 +196,15 @@ public class OneirosGraph {
     /**
      * Set a timeout for the operation.
      *
-     * @param timeout Duration string (e.g., "5s", "1m")
+     * @param timeout Duration string (e.g., "5s", "1m", "2h", "1d")
+     * @throws IllegalArgumentException if the format is not {@code \d+[smhd]}
      */
     public OneirosGraph timeout(String timeout) {
+        // MIN-6 FIX: Validate format to prevent injection via TIMEOUT clause
+        if (timeout != null && !timeout.matches("^\\d+[smhd]$")) {
+            throw new IllegalArgumentException(
+                    "Invalid timeout format '" + timeout + "'. Expected: <number>[s|m|h|d] (e.g. 5s, 2m)");
+        }
         this.timeout = timeout;
         return this;
     }

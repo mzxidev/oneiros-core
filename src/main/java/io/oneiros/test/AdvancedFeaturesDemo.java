@@ -12,14 +12,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Comprehensive demonstration of new Oneiros features:
- * - Graph & Relate API
- * - Auto-Migration & Schema Definition
- * - Automatic Versioning (Time-Travel)
- *
- * This example shows how to use all three modules together.
- */
 @Slf4j
 public class AdvancedFeaturesDemo {
 
@@ -168,9 +160,6 @@ public class AdvancedFeaturesDemo {
                 .subscribe();
     }
 
-    /**
-     * Example 2: Graph & Relate API - Create a purchase relation
-     */
     public static void exampleGraphAPI(OneirosGraph graph, User user, Product product) {
         log.info("=== Example 2: Graph & Relate API ===");
 

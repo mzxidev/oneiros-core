@@ -44,7 +44,13 @@ public class SaltManager {
 
         try {
             Files.writeString(saltFile.toPath(), base64Salt);
-            log.info("🛡️ Generated new PBKDF2 salt and saved to {}", SALT_FILE);
+
+            // MIN-3 FIX: Restrict permissions — only owner should be able to read the salt file
+            saltFile.setReadable(false, false);  // Revoke all read access
+            saltFile.setReadable(true, true);    // Grant read access to owner only
+            saltFile.setWritable(false);          // Make read-only to prevent tampering
+
+            log.info("🛡️ Generated new PBKDF2 salt and saved to {} (owner-read-only)", SALT_FILE);
             return salt;
         } catch (IOException e) {
             log.error("❌ Failed to write {}, using generated salt in memory ONLY. Will be lost on restart!", SALT_FILE, e);

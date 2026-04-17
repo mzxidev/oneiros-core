@@ -4,7 +4,7 @@ import io.oneiros.annotation.OneirosEntity;
 import io.oneiros.statement.statements.SelectStatement;
 
 /**
- * Test Runner für das neue Statement & Clause System
+ * Test Runner für das neue Statement &amp; Clause System
  */
 public class StatementSystemTest {
 

@@ -1,0 +1,4 @@
+jdk:
+  - openjdk26
+install:
+  - ./gradlew publishToMavenLocal -x test

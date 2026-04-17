@@ -92,8 +92,8 @@ class OneirosBackupManagerTest {
         assertThat(backupFile).isNotNull();
 
         // Mock restore operations
-        when(client.query(startsWith("CREATE users CONTENT"), eq(Void.class)))
-            .thenReturn(Flux.empty());
+        when(client.create(eq("users"), any(), eq(Map.class)))
+            .thenReturn(Mono.just(Map.of("id", "user:1")));
 
         // Restore backup
         StepVerifier.create(backupManager.restoreBackup(backupFile, false))
@@ -189,8 +189,8 @@ class OneirosBackupManagerTest {
         when(client.query(eq("REMOVE TABLE users"), eq(Void.class)))
             .thenReturn(Flux.empty());
 
-        when(client.query(startsWith("CREATE users CONTENT"), eq(Void.class)))
-            .thenReturn(Flux.empty());
+        when(client.create(eq("users"), any(), eq(Map.class)))
+            .thenReturn(Mono.just(Map.of("id", "user:1")));
 
         // Restore with drop
         StepVerifier.create(backupManager.restoreBackup(backupFile, true))
@@ -212,8 +212,8 @@ class OneirosBackupManagerTest {
         assertThat(backupFile).isNotNull();
 
         // Mock batch inserts
-        when(client.query(startsWith("CREATE batch_table CONTENT"), eq(Void.class)))
-            .thenReturn(Flux.empty());
+        when(client.create(eq("batch_table"), any(), eq(Map.class)))
+            .thenReturn(Mono.just(Map.of("id", "id")));
 
         StepVerifier.create(backupManager.restoreBackup(backupFile, false))
             .verifyComplete();

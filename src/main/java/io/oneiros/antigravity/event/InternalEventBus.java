@@ -17,7 +17,7 @@ public class InternalEventBus {
 
     private final Sinks.Many<OneirosEvent> bus;
 
-    private InternalEventBus() {
+    public InternalEventBus() {
         // Multicast sink with backpressure buffer
         this.bus = Sinks.many().multicast().onBackpressureBuffer();
         log.info("🚀 Antigravity InternalEventBus initialized");

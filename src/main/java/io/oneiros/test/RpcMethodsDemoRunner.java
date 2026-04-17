@@ -14,7 +14,7 @@ import java.util.Map;
  * 2. Run this demo class
  *
  * Demonstrates:
- * - Connection & Session Management (signin, authenticate, use, reset, ping, version)
+ * - Connection &amp; Session Management (signin, authenticate, use, reset, ping, version)
  * - Variables (let, unset)
  * - Queries (query, graphql, run)
  * - CRUD Operations (select, create, insert, update, upsert, merge, patch, delete)

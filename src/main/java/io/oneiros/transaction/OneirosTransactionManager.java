@@ -68,36 +68,44 @@ public class OneirosTransactionManager {
     public <T> Mono<T> execute(Function<OneirosTransaction, Mono<T>> transactionBlock) {
         log.info("🔄 Starting transaction");
 
-        // Get a dedicated connection (important for pooled clients)
-        OneirosClient dedicatedClient = client.dedicated();
+        // MED-4 FIX: Wrap in defer() + retryWhen() for Optimistic Concurrency Conflict retry.
+        // SurrealDB OCC conflicts are transient — retrying with backoff resolves them.
+        return Mono.defer(() -> {
+            OneirosClient dedicatedClient = client.dedicated();
 
-        return Mono.usingWhen(
-            // 1. Resource Allocation: BEGIN TRANSACTION
-            beginTransaction(dedicatedClient),
+            return Mono.usingWhen(
+                // 1. Resource Allocation: BEGIN TRANSACTION
+                beginTransaction(dedicatedClient),
 
-            // 2. User Code Execution: Execute the transaction block
-            tx -> {
-                log.debug("📝 Executing transaction block");
-                return transactionBlock.apply(tx)
-                    .doOnSuccess(result -> log.debug("✅ Transaction block completed successfully"))
-                    .doOnError(error -> log.error("❌ Transaction block failed: {}", error.getMessage()));
-            },
+                // 2. User Code Execution: Execute the transaction block
+                tx -> {
+                    log.debug("📝 Executing transaction block");
+                    return transactionBlock.apply(tx)
+                        .doOnSuccess(result -> log.debug("✅ Transaction block completed successfully"))
+                        .doOnError(error -> log.error("❌ Transaction block failed: {}", error.getMessage()));
+                },
 
-            // 3. Success Cleanup: COMMIT TRANSACTION
-            tx -> commitTransaction(dedicatedClient)
-                .doOnSuccess(v -> log.info("✅ Transaction committed"))
-                .doOnError(error -> log.error("❌ Commit failed: {}", error.getMessage())),
+                // 3. Success Cleanup: COMMIT TRANSACTION
+                tx -> commitTransaction(dedicatedClient)
+                    .doOnSuccess(v -> log.info("✅ Transaction committed"))
+                    .doOnError(error -> log.error("❌ Commit failed: {}", error.getMessage())),
 
-            // 4. Error Cleanup: CANCEL TRANSACTION (on user code error)
-            (tx, error) -> cancelTransaction(dedicatedClient)
-                .doOnSuccess(v -> log.warn("🔄 Transaction rolled back due to error: {}", error.getMessage()))
-                .doOnError(cancelError -> log.error("❌ Rollback failed: {}", cancelError.getMessage())),
+                // 4. Error Cleanup: CANCEL TRANSACTION (on user code error)
+                (tx, error) -> cancelTransaction(dedicatedClient)
+                    .doOnSuccess(v -> log.warn("🔄 Transaction rolled back due to error: {}", error.getMessage()))
+                    .doOnError(cancelError -> log.error("❌ Rollback failed: {}", cancelError.getMessage())),
 
-            // 5. Cancel Cleanup: CANCEL TRANSACTION (on subscription cancel)
-            tx -> cancelTransaction(dedicatedClient)
-                .doOnSuccess(v -> log.warn("🔄 Transaction rolled back due to cancellation"))
-                .doOnError(error -> log.error("❌ Rollback on cancel failed: {}", error.getMessage()))
-        );
+                // 5. Cancel Cleanup: CANCEL TRANSACTION (on subscription cancel)
+                tx -> cancelTransaction(dedicatedClient)
+                    .doOnSuccess(v -> log.warn("🔄 Transaction rolled back due to cancellation"))
+                    .doOnError(error -> log.error("❌ Rollback on cancel failed: {}", error.getMessage()))
+            );
+        }).retryWhen(reactor.util.retry.Retry
+            .backoff(3, java.time.Duration.ofMillis(50))
+            .filter(e -> e.getMessage() != null &&
+                         e.getMessage().contains("read or write conflict"))
+            .doBeforeRetry(rs -> log.warn("🔁 Retrying transaction after OCC conflict (attempt {})",
+                                          rs.totalRetries() + 1)));
     }
 
     /**
